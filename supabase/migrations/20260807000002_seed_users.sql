@@ -29,27 +29,27 @@
 -- TIME ZONE decides what "today" means for that person. This is the thing that
 -- was giving the South Africa reps yesterday's date on their morning work.
 -- ---------------------------------------------------------------------------
-with team (name, code, email, role, timezone, default_source) as (values
-  -- name        code   email                           role     timezone
-  ('Tuna',       'TU',  'CHANGE-ME@slotessentials.com', 'user',  'America/New_York'),      -- EST
-  ('Plat',       'PL',  'CHANGE-ME@slotessentials.com', 'user',  'America/New_York'),      -- EST
-  ('Pricey',     'PR',  'CHANGE-ME@slotessentials.com', 'user',  'America/New_York'),      -- EST
-  ('Chella',     'CH',  'CHANGE-ME@slotessentials.com', 'user',  'Africa/Johannesburg'),   -- South Africa
-  ('Moneyheist', 'MH',  'CHANGE-ME@slotessentials.com', 'user',  'Africa/Johannesburg'),   -- South Africa
-  ('Seanok',     'SK',  'CHANGE-ME@slotessentials.com', 'user',  'Asia/Manila'),           -- Philippines
-  ('Seb',        'SB',  'CHANGE-ME@slotessentials.com', 'user',  'America/New_York'),      -- EST
+with team (name, code, email, role, timezone) as (values
+  -- name        code   email                                 role     timezone
+  ('Tuna',       'TU',  'tunagambles@gmail.com',              'user',  'America/New_York'),      -- EST
+  ('Plat',       'PL',  'kevingrabowski487@gmail.com',        'user',  'America/New_York'),      -- EST
+  ('Pricey',     'PR',  'priced2323@gmail.com',               'user',  'America/New_York'),      -- EST
+  ('Chella',     'CH',  'rachellemariewilliams1@gmail.com',   'user',  'Africa/Johannesburg'),   -- South Africa
+  ('Moneyheist', 'MH',  'charlderidder37@gmail.com',          'user',  'Africa/Johannesburg'),   -- South Africa
+  ('Seanok',     'SK',  'palerosean@gmail.com',               'user',  'Asia/Manila'),           -- Philippines
+  ('Seb',        'SB',  'prnalo4@gmail.com',                  'user',  'America/New_York'),      -- EST
 
   -- Managers - admin
-  ('Prime',      'IC',  'CHANGE-ME@slotessentials.com', 'admin', 'America/New_York'),      -- EST
-  ('Daily',      'DL',  'CHANGE-ME@slotessentials.com', 'admin', 'America/New_York'),      -- EST
+  ('Prime',      'IC',  'isac@slotessentials.com',            'admin', 'America/New_York'),      -- EST
+  ('Daily',      'DL',  'gambadaily@gmail.com',               'admin', 'America/New_York'),      -- EST
 
   -- VIP Team - admin
-  ('Gwen',       'GW',  'CHANGE-ME@slotessentials.com', 'admin', 'America/Los_Angeles'),   -- PST
-  ('Miko',       'MK',  'CHANGE-ME@slotessentials.com', 'admin', 'Asia/Manila'),           -- Philippines
-  ('Concept',    'CN',  'CHANGE-ME@slotessentials.com', 'admin', 'Europe/Riga'),           -- Latvia
+  ('Gwen',       'GW',  'justlovejenny@gmail.com',            'admin', 'America/Los_Angeles'),   -- PST
+  ('Miko',       'MK',  'miko.hatp.0219@gmail.com',           'admin', 'Asia/Manila'),           -- Philippines
+  ('Concept',    'CN',  'aizupietisandis@gmail.com',          'admin', 'Europe/Riga'),           -- Latvia
 
-  -- You
-  ('Isac',       'IS',  'isac@slotessentials.com',      'admin', 'America/New_York')       -- change if not EST
+  -- Shared admin account
+  ('Support',    'SU',  'support@slotessentials.com',         'admin', 'America/New_York')       -- EST
 ),
 sources (code, default_source) as (values
   ('TU','Instagram'), ('CH','Discord'), ('MH','Discord'), ('SB','SlotEssentials'),
@@ -76,9 +76,9 @@ on conflict (id) do update set
 insert into public.kpi_targets (user_id, outreach_per_day, active_leads_per_day,
                                 vip_transfers_per_day, ftd_per_day, effective_from)
 select u.id,
-       case when u.code in ('IC','DL','IS') then  20 else 100 end,
-       case when u.code in ('IC','DL','IS') then   5 else  20 end,
-       case when u.code in ('IC','DL','IS') then   1 else   3 end,
+       case when u.code in ('IC','DL','SU') then  20 else 100 end,
+       case when u.code in ('IC','DL','SU') then   5 else  20 end,
+       case when u.code in ('IC','DL','SU') then   1 else   3 end,
        1,
        current_date
 from public.users u
