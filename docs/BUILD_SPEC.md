@@ -125,22 +125,25 @@ This is the source of truth for every historical number. Today/week/month roll u
 ## 4. The funnel
 
 ```
-Initial Contact → Interested → VIP Transferred → KYC Complete → First Deposit → Active
-                                     ↓
-             Potential Lead  /  Reactivation Queue  /  Dead Lead
+Initial Contact → VIP Transferred → First Deposit → Active
+                         ↓
+     Potential Lead  /  Reactivation Queue  /  Dead Lead
 ```
 
 | Status | Cadence | Next action shown to the rep |
 |---|---|---|
-| Initial Contact | 1 day | Day 1: check account, check KYC, help deposit |
-| Interested | 1 day | Check account, check KYC, help deposit |
+| Initial Contact | 1 day | Check account, check KYC, help them deposit |
 | VIP Transferred | **see §6** | Urgent — finish KYC, lock in first deposit |
-| KYC Complete | 1 day | Help deposit / confirm pending |
 | First Deposit | 3 days | Confirm playing, resolve issues |
 | Active | 14 days | Periodic check-in, encourage play |
 | Reactivation Queue | 3 days | Win-back outreach |
 | Potential Lead | 7 days | Gone quiet — re-target without writing off |
 | Dead Lead | 30 days | Re-target, see if anything changed |
+
+**Two stages were dropped from the spreadsheet version.** *Interested* had the same
+cadence and the same next action as Initial Contact — it described a feeling, not a
+stage. *KYC Complete* duplicated the `kyc_status` field every player already carries,
+putting the same fact in two places that could disagree.
 
 Cadences must be **configurable data**, not code constants.
 
