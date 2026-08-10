@@ -2,6 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body {
-  -webkit-font-smoothing: antialiased;
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink text-body;
+  }
+
+  /* One focus treatment everywhere, visible on every background. */
+  :focus-visible {
+    outline: 2px solid theme("colors.accent");
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Numbers in tables and metrics line up in columns. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Hides scrollbars on horizontally scrolling table wrappers without
+     removing the ability to scroll. */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* The interface must still be complete and legible with motion switched off. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -18,6 +18,10 @@ export type Player = {
   next_action: string;
   missing_roobet: boolean;
   is_dead: boolean;
+  // Present on Book rows; the queue does not select them.
+  is_ftd?: boolean;
+  first_deposit_at?: string | null;
+  owner_id?: string;
 };
 
 export type Me = {
@@ -63,13 +67,15 @@ export async function getSetting(key: string, fallback: string): Promise<string>
 /**
  * TODAY'S QUEUE.
  *
- * Someone is due when their follow-up date has arrived, OR they still have no
- * Roobet username - the single biggest blocker, so those resurface daily until
- * it is filled.
+ * Someone is due if any of these is true:
+ *   - you have never contacted them (a newly added lead, waiting to be worked)
+ *   - their follow-up date has arrived
+ *   - they still have no Roobet username, the single biggest blocker, so those
+ *     resurface every day until it is filled
  *
- * Crucially, anyone contacted today is excluded. Without that a finished task
- * stays on the list and ticking it appears to do nothing, which is exactly how
- * the spreadsheet behaved.
+ * And in every case, only if you have NOT already contacted them today.
+ * Without that last part a finished task stays on the list and ticking it
+ * appears to do nothing - which is exactly how the spreadsheet behaved.
  *
  * Ordering puts live leads above revived dead leads. A dead lead hitting its
  * 30-day retarget has the longest gap since contact, so on a plain
@@ -85,7 +91,9 @@ export async function getDueNow(me: Me): Promise<Player[]> {
     .from("players_enriched")
     .select(PLAYER_FIELDS)
     .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
-    .or(`next_followup_at.lte.${endToday},missing_roobet.is.true`)
+    .or(
+      `last_contact_at.is.null,next_followup_at.lte.${endToday},missing_roobet.is.true`
+    )
     .order("is_dead", { ascending: true })
     .order("last_contact_at", { ascending: true, nullsFirst: true })
     .limit(500);

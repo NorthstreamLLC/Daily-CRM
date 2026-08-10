@@ -8,7 +8,13 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const requested = searchParams.get("next") ?? "/today";
+
+  // Only ever redirect within this site. An open redirect here would let a
+  // crafted email bounce someone straight off to another domain.
+  const next = requested.startsWith("/") && !requested.startsWith("//")
+    ? requested
+    : "/today";
 
   if (code) {
     const supabase = createClient();

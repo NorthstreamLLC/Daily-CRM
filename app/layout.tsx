@@ -6,10 +6,16 @@ export const metadata: Metadata = {
   description: "Lead pipeline and daily task queue",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="font-sans text-slate-900">{children}</body>
+      {/* Colours and type come from globals.css, which reads the design tokens. */}
+      <body>{children}</body>
     </html>
   );
 }

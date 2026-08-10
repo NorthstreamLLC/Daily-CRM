@@ -33,7 +33,7 @@ export async function signIn(
   }
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect("/today");
 }
 
 /**

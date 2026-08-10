@@ -11,10 +11,14 @@
  * person's local day.
  */
 
+/** The calendar date (YYYY-MM-DD) an instant falls on, in this person's zone. */
+export function ymdInZone(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(instant);
+}
+
 /** The instant that midnight-tonight-just-gone was, in this person's zone. */
 export function startOfDayUtc(timeZone: string, now: Date = new Date()): Date {
-  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone }).format(now); // YYYY-MM-DD
-  return wallTimeToUtc(`${ymd}T00:00:00`, timeZone);
+  return wallTimeToUtc(`${ymdInZone(now, timeZone)}T00:00:00`, timeZone);
 }
 
 /** The instant that midnight-tonight-coming will be, in this person's zone. */
@@ -65,6 +69,19 @@ export function formatDate(value: string | null, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     day: "numeric",
     month: "short",
+    timeZone,
+  }).format(new Date(value));
+}
+
+/** "7 Aug, 14:32" - for timeline entries, where the time of day matters. */
+export function formatDateTime(value: string | null, timeZone: string): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
     timeZone,
   }).format(new Date(value));
 }

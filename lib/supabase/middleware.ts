@@ -54,7 +54,7 @@ export async function updateSession(request: NextRequest) {
   // Already signed in and sitting on the login page - send them onward.
   if (user && path === "/login") {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/today";
     return NextResponse.redirect(url);
   }
 
