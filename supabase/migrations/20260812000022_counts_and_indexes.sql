@@ -1,5 +1,5 @@
 -- ============================================================================
--- Speed: count in the database, and index what we filter on
+-- Speed: count in the database
 --
 -- HOW TO RUN
 --   Supabase dashboard > SQL Editor > New query > paste this whole file > Run.
@@ -13,6 +13,23 @@
 --   wire on every page load to produce about twenty numbers.
 --
 --   Postgres can count. These do it there, and return one row per group.
+--
+-- A NOTE ON INDEXES
+--   The first version of this file added six. Five were wrong:
+--
+--     next_followup_at and missing_roobet are computed by the
+--     players_enriched VIEW from last_contact_at, assigned_at and the
+--     status's followup_days. They are not columns on players and cannot be
+--     indexed - which is the error this file originally produced.
+--
+--     lower(btrim(roobet_username)), reference, (player_id, occurred_at) and
+--     (period_type, period_start) were already indexed by migrations 001,
+--     005, 017 and 021. Adding them again costs write speed and disk for no
+--     read benefit.
+--
+--   The queue's own filter is already served by players_owner_contact_idx
+--   (owner_id, last_contact_at) and players_owner_status_idx (owner_id,
+--   status) from 001. So exactly one index below is genuinely new.
 -- ============================================================================
 
 drop function if exists public.player_counts_by_owner();
@@ -60,7 +77,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select coalesce(p.source, '')::text, count(*)::bigint
+  select p.source::text, count(*)::bigint
     from public.players p
    where p.source is not null
    group by p.source;
@@ -71,42 +88,26 @@ grant execute on function public.player_counts_by_source() to authenticated;
 
 
 -- ---------------------------------------------------------------------------
--- Indexes for the paths that run on every page load.
+-- The one index that is actually new.
 --
--- Each of these backs a filter or a join that currently makes Postgres read
--- the whole table. CONCURRENTLY is deliberately NOT used: the Supabase SQL
--- editor runs statements in a transaction, and CONCURRENTLY is not allowed
--- inside one. These tables are small enough that a brief lock is nothing.
+-- Stats filters activity_log by person AND event type AND day, constantly.
+-- 001 indexed (user_id, occurred_at) and (event_type, occurred_at) separately,
+-- so Postgres could use one or the other and then filter the rest by hand.
+-- This composite serves the whole condition.
+--
+-- CONCURRENTLY is deliberately not used: the Supabase SQL editor wraps
+-- statements in a transaction and will not allow it there.
 -- ---------------------------------------------------------------------------
-
--- The queue's own condition: never contacted, or due.
-create index if not exists players_queue_idx
-  on public.players (owner_id, last_contact_at, next_followup_at);
-
--- Matching a Roobet username to a player happens on every sync and every
--- wager read. Without this it is a full scan per lookup.
-create index if not exists players_roobet_lower_idx
-  on public.players (lower(btrim(roobet_username)))
-  where roobet_username is not null;
-
--- Book search by handle and by reference.
-create index if not exists players_reference_idx on public.players (reference);
-
--- The message log, newest first per player.
-create index if not exists player_messages_recent_idx
-  on public.player_messages (player_id, occurred_at desc);
-
--- Stats read activity_log by person and day, constantly.
 create index if not exists activity_user_type_time_idx
   on public.activity_log (user_id, event_type, occurred_at desc);
 
--- Wager period lookups by type and date - the headline cards, every load.
-create index if not exists wager_periods_type_start_idx
-  on public.wager_periods (period_type, period_start);
 
 -- ---------------------------------------------------------------------------
--- Done. Worth running ANALYZE afterwards so the planner sees the new indexes:
---   analyze public.players;
---   analyze public.activity_log;
---   analyze public.wager_periods;
+-- Let the planner see what changed.
+-- ---------------------------------------------------------------------------
+analyze public.players;
+analyze public.activity_log;
+
+-- ---------------------------------------------------------------------------
+-- Done.
 -- ---------------------------------------------------------------------------
