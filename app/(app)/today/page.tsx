@@ -19,6 +19,7 @@ import {
   getMe,
   getDueNow,
   getComingUp,
+  countDeadLeads,
   getDeadLeads,
   getTodayStats,
   getTargets,
@@ -168,16 +169,18 @@ export default async function TodayPage({
 
   const supabase = createClient();
 
-  const [dueNow, comingUp, deadLeads, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
+  const [dueNow, comingUp, deadLeads, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
       getDueNow(me, ownerId),
       getComingUp(me, comingUpDays, ownerId),
-      getDeadLeads(me, ownerId),
+      // Today shows a few and links to the Book for the rest.
+      getDeadLeads(me, ownerId, 12),
+      countDeadLeads(me, ownerId),
       getTodayStats(me, ownerId),
       getTargets(me, ownerId),
       getStatuses(),
       getSources(),
-      getChurn(me.timezone, ownerId),
+      getChurn(me.timezone, ownerId, 20),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
         : Promise.resolve({ data: null }),
@@ -461,7 +464,7 @@ export default async function TodayPage({
       <section>
         <GroupHeader
           title="Dead leads"
-          count={deadLeads.length}
+          count={deadTotal}
           hint="soonest retarget first — they rejoin the queue when their 30 days is up"
           action={
             deadLeads.length > 0 ? (
@@ -482,12 +485,12 @@ export default async function TodayPage({
           />
         ) : (
           <div className="space-y-1.5">
-            {deadLeads.slice(0, 20).map((p) => (
+            {deadLeads.map((p) => (
               <TaskRow key={p.id} player={p} {...rowProps} showComplete={false} />
             ))}
-            {deadLeads.length > 20 && (
+            {deadTotal > deadLeads.length && (
               <p className="pt-1 text-small text-ink-muted">
-                Showing 20 of {deadLeads.length}.{" "}
+                Showing {deadLeads.length} of {deadTotal}.{" "}
                 <Link href="/book?flag=dead" className="font-medium text-accent hover:underline">
                   See the rest in Book
                 </Link>

@@ -166,8 +166,35 @@ export async function getComingUp(
   return (data ?? []) as unknown as Player[];
 }
 
-/** Every dead lead, soonest retarget first. Workable whenever they choose. */
-export async function getDeadLeads(me: Me, ownerId?: string): Promise<Player[]> {
+/**
+ * How many dead leads this rep has, without fetching any of them.
+ *
+ * head: true means Postgres returns the count in a header and no rows at all -
+ * which is what a badge needs. Fetching 500 rows to display the number 500 is
+ * the kind of thing that is free at 20 players and expensive at 1,000.
+ */
+export async function countDeadLeads(me: Me, ownerId?: string): Promise<number> {
+  const supabase = createClient();
+  const { count } = await supabase
+    .from("players_enriched")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", ownerId || me.id)
+    .eq("is_dead", true);
+  return count ?? 0;
+}
+
+/**
+ * Dead leads, soonest retarget first.
+ *
+ * Takes a limit because Today renders a handful and links to the Book for the
+ * rest. It was fetching 500 rows to display 8 - invisible at 20 players, and
+ * 500 wasted rows on every page load at 1,000.
+ */
+export async function getDeadLeads(
+  me: Me,
+  ownerId?: string,
+  limit = 500
+): Promise<Player[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("players_enriched")
@@ -175,7 +202,7 @@ export async function getDeadLeads(me: Me, ownerId?: string): Promise<Player[]> 
     .eq("owner_id", ownerId || me.id)
     .eq("is_dead", true)
     .order("next_followup_at", { ascending: true, nullsFirst: true })
-    .limit(500);
+    .limit(limit);
 
   if (error) throw error;
   return (data ?? []) as unknown as Player[];

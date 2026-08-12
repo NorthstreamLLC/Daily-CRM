@@ -54,7 +54,8 @@ export type ChurnReport = {
  */
 export async function getChurn(
   timezone: string,
-  ownerId?: string
+  ownerId?: string,
+  limit = 40
 ): Promise<ChurnReport> {
   const supabase = createClient();
 
@@ -71,56 +72,90 @@ export async function getChurn(
     Math.max(1, Number(setting.get("churn_drop_percent") ?? 50) || 50)
   );
   const minWager = Math.max(0, Number(setting.get("churn_min_wager") ?? 100) || 0);
-
-  /* Thirty days against the thirty before. Rolling, so a slide shows up as it
-     happens rather than waiting for a month boundary. */
   const windowDays = 30;
 
-  type Pair = {
-    player_id: string;
+  /* One database call that returns only the flagged players.
+  
+     This used to fetch every player in the company with any wager - up to
+     50,000 rows - and then discard other people's in JavaScript. At 13,000
+     players that was 13,000 rows crossing the wire on every Today load, to
+     display at most ten. Filtering by owner in SQL is both faster and a
+     tighter privacy boundary: a rep's page never touches another rep's rows
+     at all. */
+  const { data, error } = await supabase.rpc("churn_players", {
+    p_owner: ownerId ?? null,
+    p_days: windowDays,
+    p_drop: dropPercent,
+    p_min: minWager,
+    p_limit: limit,
+  });
+
+  if (error) {
+    // Migration not run yet - an empty panel beats a broken page.
+    return {
+      quiet: [],
+      dropping: [],
+      watched: [],
+      atRisk: 0,
+      windowDays,
+      configured,
+      basis: "none",
+      basisLabel: "run migration 20260812000023_scale.sql",
+    };
+  }
+
+  type Row = {
+    id: string;
+    handle: string;
+    reference: string;
+    roobet_username: string | null;
+    status: string;
     owner_id: string;
+    owner_name: string;
+    all_time: number;
     current_sum: number;
     previous_sum: number;
-    current_days?: number;
-    previous_days?: number;
+    pinned: boolean;
+    pinned_note: string | null;
+    basis: string;
   };
 
-  const [rolling, monthly, { data: players }, { data: users }, { data: watch }] =
-    await Promise.all([
-      supabase
-        .rpc("wager_window_pairs", { p_days: windowDays })
-        .then((r) => (r.data ?? []) as Pair[]),
-      supabase.rpc("wager_month_pairs").then((r) => (r.data ?? []) as Pair[]),
-      supabase
-        .from("players")
-        .select("id, handle, reference, roobet_username, status, owner_id, weighted_wager")
-        .gt("weighted_wager", minWager)
-        .limit(50000),
-      supabase.from("users").select("id, name"),
-      supabase
-        .from("vip_watch")
-        .select("player_id, note")
-        .is("resolved_at", null)
-        .limit(5000),
-    ]);
+  const rows = (data ?? []) as Row[];
 
-  /* Daily facts only exist from the day syncing started, so early on the
-     rolling window is comparing three days with three days and calling it a
-     month. When there is not enough of it, fall back to calendar months -
-     those came from the backfill and go back properly. Saying which one is in
-     use matters more than always using the fancier one. */
-  const daysCovered = rolling.reduce(
-    (max, p) => Math.max(max, (p.previous_days ?? 0) + (p.current_days ?? 0)),
-    0
-  );
-  const rollingUsable = daysCovered >= windowDays + 7;
+  const quiet: ChurnPlayer[] = [];
+  const dropping: ChurnPlayer[] = [];
+  const watched: ChurnPlayer[] = [];
+  let atRisk = 0;
 
-  const basis: ChurnReport["basis"] = rollingUsable
-    ? "rolling"
-    : monthly.length > 0
-      ? "month"
-      : "none";
+  for (const r of rows) {
+    const cur = Number(r.current_sum);
+    const prev = Number(r.previous_sum);
 
+    const player: ChurnPlayer = {
+      id: r.id,
+      handle: r.handle,
+      reference: r.reference,
+      roobetUsername: r.roobet_username,
+      status: r.status,
+      ownerId: r.owner_id,
+      ownerName: r.owner_name,
+      allTime: Number(r.all_time),
+      current: cur,
+      previous: prev,
+      dropShare: prev > 0 ? cur / prev : 1,
+      pinned: Boolean(r.pinned),
+      pinnedNote: r.pinned_note,
+      kind: cur <= 0 ? "quiet" : "dropping",
+    };
+
+    atRisk += Math.max(0, prev - cur);
+
+    if (player.pinned) watched.push(player);
+    else if (cur <= 0) quiet.push(player);
+    else dropping.push(player);
+  }
+
+  const basis = (rows[0]?.basis ?? "none") as ChurnReport["basis"];
   const basisLabel =
     basis === "rolling"
       ? `last ${windowDays} days vs the ${windowDays} before`
@@ -128,81 +163,5 @@ export async function getChurn(
         ? "this month vs last month"
         : "not enough history yet";
 
-  const pairs = basis === "rolling" ? rolling : monthly;
-
-  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
-  const pairBy = new Map(pairs.map((d) => [d.player_id, d]));
-  const watched = new Map(
-    (watch ?? []).map((w) => [w.player_id as string, (w.note as string | null) ?? null])
-  );
-
-  const quiet: ChurnPlayer[] = [];
-  const dropping: ChurnPlayer[] = [];
-  const pinnedList: ChurnPlayer[] = [];
-  let atRisk = 0;
-
-  for (const p of players ?? []) {
-    if (ownerId && p.owner_id !== ownerId) continue;
-
-    const pair = pairBy.get(p.id);
-    const cur = Number(pair?.current_sum ?? 0);
-    const prev = Number(pair?.previous_sum ?? 0);
-    const share = prev > 0 ? cur / prev : 1;
-    const isPinned = watched.has(p.id);
-
-    const base = {
-      id: p.id,
-      handle: p.handle,
-      reference: p.reference,
-      roobetUsername: p.roobet_username,
-      status: p.status,
-      ownerId: p.owner_id,
-      ownerName: names.get(p.owner_id) ?? "—",
-      allTime: Number(p.weighted_wager ?? 0),
-      current: cur,
-      previous: prev,
-      dropShare: share,
-      pinned: isPinned,
-      pinnedNote: watched.get(p.id) ?? null,
-    };
-
-    /* A pinned player is on the list because someone put them there, so no
-       threshold applies - not the dead-lead rule either. Somebody decided
-       they are worth watching. */
-    if (isPinned) {
-      pinnedList.push({ ...base, kind: cur <= 0 ? "quiet" : "dropping" });
-      atRisk += Math.max(0, prev - cur);
-      continue;
-    }
-
-    // Already written off - nothing to warn about.
-    if (p.status === "Dead Lead") continue;
-
-    // No prior activity to fall away from.
-    if (prev <= 0) continue;
-
-    if (cur <= 0) {
-      quiet.push({ ...base, kind: "quiet" });
-      atRisk += prev;
-    } else if (share < dropPercent / 100) {
-      dropping.push({ ...base, kind: "dropping" });
-      atRisk += prev - cur;
-    }
-  }
-
-  // Biggest losses first - that is the order to work them in.
-  quiet.sort((a, b) => b.previous - a.previous);
-  dropping.sort((a, b) => b.previous - b.current - (a.previous - a.current));
-  pinnedList.sort((a, b) => b.previous - b.current - (a.previous - a.current));
-
-  return {
-    quiet,
-    dropping,
-    watched: pinnedList,
-    atRisk,
-    windowDays,
-    configured,
-    basis,
-    basisLabel,
-  };
+  return { quiet, dropping, watched, atRisk, windowDays, configured, basis, basisLabel };
 }
