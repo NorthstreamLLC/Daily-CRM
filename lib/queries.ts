@@ -98,7 +98,7 @@ export const getSetting = cache(async function getSetting(
  * longest-neglected sort it would lead the queue every morning and bury the
  * work that actually earns.
  */
-export async function getDueNow(me: Me): Promise<Player[]> {
+export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
   const supabase = createClient();
   const endToday = endOfDayUtc(me.timezone).toISOString();
   const startToday = startOfDayUtc(me.timezone).toISOString();
@@ -106,6 +106,13 @@ export async function getDueNow(me: Me): Promise<Player[]> {
   const { data, error } = await supabase
     .from("players_enriched")
     .select(PLAYER_FIELDS)
+    /* Scope explicitly rather than leaning on Row Level Security.
+       RLS says "your own players, OR everything if you are an admin" - which
+       is right for permission but wrong for a personal queue: it made an
+       admin's Today show every rep's work as though it were theirs. Worse,
+       ticking one off would have logged the completion against the admin and
+       moved that player's follow-up date. */
+    .eq("owner_id", ownerId || me.id)
     .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
     .or(
       `last_contact_at.is.null,next_followup_at.lte.${endToday},missing_roobet.is.true`
@@ -133,7 +140,11 @@ export async function getDueNow(me: Me): Promise<Player[]> {
  * moved straight to Active would be due in fourteen days, outside the window,
  * and would have vanished from the page entirely on the day they were created.
  */
-export async function getComingUp(me: Me, windowDays: number): Promise<Player[]> {
+export async function getComingUp(
+  me: Me,
+  windowDays: number,
+  ownerId?: string
+): Promise<Player[]> {
   const supabase = createClient();
   const startToday = startOfDayUtc(me.timezone).toISOString();
   const endToday = endOfDayUtc(me.timezone).toISOString();
@@ -142,6 +153,7 @@ export async function getComingUp(me: Me, windowDays: number): Promise<Player[]>
   const { data, error } = await supabase
     .from("players_enriched")
     .select(PLAYER_FIELDS)
+    .eq("owner_id", ownerId || me.id)
     .eq("is_dead", false)
     .or(
       `and(missing_roobet.eq.false,next_followup_at.gt.${endToday},next_followup_at.lte.${horizon}),` +
@@ -155,11 +167,12 @@ export async function getComingUp(me: Me, windowDays: number): Promise<Player[]>
 }
 
 /** Every dead lead, soonest retarget first. Workable whenever they choose. */
-export async function getDeadLeads(me: Me): Promise<Player[]> {
+export async function getDeadLeads(me: Me, ownerId?: string): Promise<Player[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("players_enriched")
     .select(PLAYER_FIELDS)
+    .eq("owner_id", ownerId || me.id)
     .eq("is_dead", true)
     .order("next_followup_at", { ascending: true, nullsFirst: true })
     .limit(500);
@@ -176,7 +189,7 @@ export async function getDeadLeads(me: Me): Promise<Player[]> {
  * means a status set by mistake and corrected the next day still counts
  * forever. Counting logged events means a correction removes itself.
  */
-export async function getTodayStats(me: Me) {
+export async function getTodayStats(me: Me, ownerId?: string) {
   const supabase = createClient();
   const start = startOfDayUtc(me.timezone).toISOString();
   const end = endOfDayUtc(me.timezone).toISOString();
@@ -184,7 +197,7 @@ export async function getTodayStats(me: Me) {
   const { data: events } = await supabase
     .from("activity_log")
     .select("event_type, to_status")
-    .eq("user_id", me.id)
+    .eq("user_id", ownerId || me.id)
     .gte("occurred_at", start)
     .lt("occurred_at", end);
 
@@ -208,12 +221,12 @@ export async function getTodayStats(me: Me) {
   };
 }
 
-export async function getTargets(me: Me) {
+export async function getTargets(me: Me, ownerId?: string) {
   const supabase = createClient();
   const { data } = await supabase
     .from("kpi_targets")
     .select("active_leads_per_day, vip_transfers_per_day, ftd_per_day")
-    .eq("user_id", me.id)
+    .eq("user_id", ownerId || me.id)
     .order("effective_from", { ascending: false })
     .limit(1)
     .maybeSingle();

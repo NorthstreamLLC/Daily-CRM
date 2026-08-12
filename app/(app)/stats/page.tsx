@@ -10,6 +10,8 @@ import {
 } from "@/lib/admin";
 import { ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
+import { ViewAs } from "../ViewAs";
+import { createClient } from "@/lib/supabase/server";
 import {
   getActivity,
   getFunnel,
@@ -179,19 +181,37 @@ export default async function StatsPage({
     "today"
   );
 
-  const targets = await getTargets(me);
+  /* An admin may look at any rep's numbers; a rep is pinned to their own.
+     Without this an admin's Stats page was permanently empty - every figure
+     scoped to a person who carries no players. */
+  const isAdmin = me.role === "admin";
+  const ownerId = (isAdmin ? one("owner") : "") || me.id;
+  const viewingSomeoneElse = ownerId !== me.id;
 
-  const [funnel, activity, sources, trend, records, stages, wager] = await Promise.all([
-    getFunnel(me.id, range),
-    getActivity(me.id, range),
-    getSourcePerformance(me.id, range),
-    getTrend(me.id, me.timezone, trendDays(range)),
-    getRecords(me.id, me.timezone, targets.activeLeads),
-    // RLS scopes this to the viewer's own players, so a rep sees their book's
-    // composition and an admin viewing here sees everyone's combined.
-    getFunnelStages(),
-    getWagerReport(resolveReportPeriod(reportChoiceFor(range.key)).period, me.id),
-  ]);
+  const supabase = createClient();
+  const targets = await getTargets(me, ownerId);
+
+  const [funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
+    await Promise.all([
+      getFunnel(ownerId, range),
+      getActivity(ownerId, range),
+      getSourcePerformance(ownerId, range),
+      getTrend(ownerId, me.timezone, trendDays(range)),
+      getRecords(ownerId, me.timezone, targets.activeLeads),
+      // RLS scopes this to the viewer's own players, so a rep sees their book's
+      // composition and an admin viewing here sees everyone's combined.
+      getFunnelStages(),
+      getWagerReport(resolveReportPeriod(reportChoiceFor(range.key)).period, ownerId),
+      isAdmin
+        ? supabase.from("users").select("id, name").eq("active", true).order("name")
+        : Promise.resolve({ data: null }),
+      viewingSomeoneElse
+        ? supabase.from("users").select("name").eq("id", ownerId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+  const team = (teamRes.data ?? []) as { id: string; name: string }[];
+  const ownerName = (ownerRes.data as { name: string } | null)?.name ?? null;
 
   const bookTotal = stages.reduce((sum, s) => sum + s.playerCount, 0);
 
@@ -200,11 +220,26 @@ export default async function StatsPage({
 
   return (
     <>
-      <div className="mb-5">
-        <h1 className="text-h1 font-semibold tracking-tight text-ink">Your performance</h1>
-        <p className="mt-0.5 text-body text-ink-muted">
-          Counted from what was actually logged, so a correction removes itself.
-        </p>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-h1 font-semibold tracking-tight text-ink">
+            {viewingSomeoneElse && ownerName
+              ? `${ownerName}'s performance`
+              : "Your performance"}
+          </h1>
+          <p className="mt-0.5 text-body text-ink-muted">
+            Counted from what was actually logged, so a correction removes itself.
+          </p>
+        </div>
+        {isAdmin && (
+          <ViewAs
+            team={team}
+            current={ownerId}
+            meId={me.id}
+            basePath="/stats"
+            keep={["period", "from", "to"]}
+          />
+        )}
       </div>
 
       <RangePicker range={range} today={ymdInZone(new Date(), me.timezone)} />

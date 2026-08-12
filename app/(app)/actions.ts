@@ -42,7 +42,7 @@ export async function completeTask(playerId: string): Promise<ActionState> {
   const { data: player } = await supabase
     .from("players")
     .select(
-      "id, status, roobet_username, followup_attempts, vip_fasttrack_checkins, last_contact_at"
+      "id, status, roobet_username, followup_attempts, vip_fasttrack_checkins, last_contact_at, owner_id"
     )
     .eq("id", playerId)
     .single();
@@ -69,11 +69,19 @@ export async function completeTask(playerId: string): Promise<ActionState> {
   const { error } = await supabase.from("players").update(patch).eq("id", playerId);
   if (error) return { error: error.message };
 
+  /* Credit the player's OWNER, not whoever clicked. An admin working through
+     a rep's day is helping, not earning - logging it against the admin would
+     take the touch off the rep's stats and put it on someone whose targets do
+     not include it. Who actually clicked is kept in the metadata, so the
+     record is still honest. */
   await supabase.from("activity_log").insert({
     player_id: playerId,
-    user_id: me.id,
+    user_id: player.owner_id,
     event_type: "task_completed",
-    metadata: { status: player.status },
+    metadata: {
+      status: player.status,
+      ...(player.owner_id !== me.id ? { logged_by: me.id } : {}),
+    },
   });
 
   refresh();
@@ -94,7 +102,9 @@ export async function undoCompleteTask(playerId: string): Promise<ActionState> {
 
   const { data: player } = await supabase
     .from("players")
-    .select("id, status, roobet_username, followup_attempts, vip_fasttrack_checkins, last_contact_at")
+    .select(
+      "id, status, roobet_username, followup_attempts, vip_fasttrack_checkins, last_contact_at, owner_id"
+    )
     .eq("id", playerId)
     .single();
 
@@ -129,9 +139,12 @@ export async function undoCompleteTask(playerId: string): Promise<ActionState> {
 
   await supabase.from("activity_log").insert({
     player_id: playerId,
-    user_id: me.id,
+    user_id: player.owner_id ?? me.id,
     event_type: "note_added",
-    metadata: { undo: "task_completed" },
+    metadata: {
+      undo: "task_completed",
+      ...(player.owner_id && player.owner_id !== me.id ? { logged_by: me.id } : {}),
+    },
   });
 
   refresh();

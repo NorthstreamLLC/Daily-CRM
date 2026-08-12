@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TaskRow } from "./TaskRow";
 import { AddPlayer } from "./AddPlayer";
+import { ViewAs } from "../ViewAs";
+import { createClient } from "@/lib/supabase/server";
 import { EmptyState, cn } from "@/components/ui";
 import {
   AlertTriangle,
@@ -153,17 +155,39 @@ export default async function TodayPage({
   const attemptsThreshold = Number(attemptsRaw) || 3;
   const overdueHours = Number(overdueRaw) || 24;
 
-  const [dueNow, comingUp, deadLeads, stats, targets, statuses, sources, churn] =
+  /* An admin may look at any rep's day; a rep is pinned to their own,
+     whatever the URL says. Everything below is scoped to this id explicitly -
+     see the note in getDueNow for why RLS alone was not enough. */
+  const isAdmin = me.role === "admin";
+  const one2 = (key: string) => {
+    const v = searchParams[key];
+    return Array.isArray(v) ? v[0] : v;
+  };
+  const ownerId = (isAdmin ? one2("owner") : "") || me.id;
+  const viewingSomeoneElse = ownerId !== me.id;
+
+  const supabase = createClient();
+
+  const [dueNow, comingUp, deadLeads, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
-      getDueNow(me),
-      getComingUp(me, comingUpDays),
-      getDeadLeads(me),
-      getTodayStats(me),
-      getTargets(me),
+      getDueNow(me, ownerId),
+      getComingUp(me, comingUpDays, ownerId),
+      getDeadLeads(me, ownerId),
+      getTodayStats(me, ownerId),
+      getTargets(me, ownerId),
       getStatuses(),
       getSources(),
-      getChurn(me.timezone, me.id),
+      getChurn(me.timezone, ownerId),
+      isAdmin
+        ? supabase.from("users").select("id, name").eq("active", true).order("name")
+        : Promise.resolve({ data: null }),
+      viewingSomeoneElse
+        ? supabase.from("users").select("name").eq("id", ownerId).maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
+
+  const team = (teamRes.data ?? []) as { id: string; name: string }[];
+  const ownerName = (ownerRes.data as { name: string } | null)?.name ?? null;
 
   /**
    * Split the queue into overdue and due-today.
@@ -212,18 +236,32 @@ export default async function TodayPage({
 
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-h1 font-semibold tracking-tight text-ink">Today</h1>
+          <h1 className="text-h1 font-semibold tracking-tight text-ink">
+            {viewingSomeoneElse && ownerName ? `${ownerName}'s day` : "Today"}
+          </h1>
           <p className="mt-0.5 text-body text-ink-muted">
             {clear
-              ? "Your queue is clear."
+              ? viewingSomeoneElse
+                ? "Their queue is clear."
+                : "Your queue is clear."
               : `${dueNow.length} ${dueNow.length === 1 ? "person" : "people"} to reach out to.`}
           </p>
         </div>
-        <AddPlayer
-          sources={sources}
-          defaultSource={me.default_source}
-          statuses={statuses as { name: string }[]}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (
+            <ViewAs team={team} current={ownerId} meId={me.id} basePath="/today" />
+          )}
+          {/* Adding a player puts them in YOUR book, so it is hidden while
+              looking at someone else's day - it would silently create the
+              player under the wrong rep. */}
+          {!viewingSomeoneElse && (
+            <AddPlayer
+              sources={sources}
+              defaultSource={me.default_source}
+              statuses={statuses as { name: string }[]}
+            />
+          )}
+        </div>
       </div>
 
       {/* Whether today's work is done, said once and plainly. */}
