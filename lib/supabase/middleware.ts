@@ -12,9 +12,33 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  /* Middleware runs before every page, so anything thrown here takes the whole
+     site down with MIDDLEWARE_INVOCATION_FAILED - a 500 that names no cause.
+     Missing configuration is the common way to get there, so say so plainly
+     rather than crashing. */
+  if (!url || !anonKey) {
+    const missing = [
+      !url && "NEXT_PUBLIC_SUPABASE_URL",
+      !anonKey && "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+
+    return new NextResponse(
+      `Not configured: ${missing} is missing.\n\n` +
+        "On Vercel: Project > Settings > Environment Variables, add it for " +
+        "Production, then redeploy - variables are baked in at build time, so " +
+        "adding one to an existing deployment does nothing until it rebuilds.",
+      { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } }
+    );
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    url,
+    anonKey,
     {
       cookies: {
         getAll() {
@@ -33,10 +57,19 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Do not remove: this call is what actually refreshes an expiring token.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  /* Do not remove: this call is what actually refreshes an expiring token.
+
+     Wrapped because a network blip or a bad URL reaching Supabase would
+     otherwise crash middleware and take down every route at once. Treating a
+     failure as "not signed in" degrades to the login page, which is both safe
+     and recoverable. */
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    user = null;
+  }
 
   const path = request.nextUrl.pathname;
   const isPublic =
