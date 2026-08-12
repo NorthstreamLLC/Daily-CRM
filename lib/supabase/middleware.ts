@@ -75,7 +75,12 @@ export async function updateSession(request: NextRequest) {
   const isPublic =
     path.startsWith("/login") ||
     path.startsWith("/auth") ||
-    path.startsWith("/reset-password");
+    path.startsWith("/reset-password") ||
+    /* robots.txt has to be readable by a crawler that is, by definition, not
+       signed in. Redirecting it to /login means the file is never delivered
+       and the instruction never received - which defeats the point of having
+       it. It gives nothing away: it names no paths, only "deny everything". */
+    path === "/robots.txt";
 
   // Not signed in and asking for a real page - send them to log in.
   if (!user && !isPublic) {

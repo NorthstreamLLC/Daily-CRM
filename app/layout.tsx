@@ -1,9 +1,22 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Daily CRM",
   description: "Lead pipeline and daily task queue",
+
+  /* This is an internal tool holding real player data. Nothing about it
+     should ever appear in a search result, so every page asks not to be
+     indexed, cached, or have a preview snippet taken. Belt and braces with
+     robots.txt and the X-Robots-Tag header in next.config - a crawler that
+     ignores one may still respect another. */
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false, noimageindex: true },
+  },
 };
 
 export const viewport = {
@@ -25,7 +38,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       {/* Colours and type come from globals.css, which reads the design tokens. */}
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Page views only - no cookies, no cross-site identifiers, and it
+            reports nothing about who is signed in. */}
+        <Analytics />
+      </body>
     </html>
   );
 }
