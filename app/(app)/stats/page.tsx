@@ -2,7 +2,12 @@ import { redirect } from "next/navigation";
 import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { BarChart, Flame, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
 import { getMe, getTargets } from "@/lib/queries";
-import { getFunnelStages, getWagerReport } from "@/lib/admin";
+import {
+  getFunnelStages,
+  getWagerReport,
+  reportChoiceFor,
+  resolveReportPeriod,
+} from "@/lib/admin";
 import { ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
 import {
@@ -185,7 +190,7 @@ export default async function StatsPage({
     // RLS scopes this to the viewer's own players, so a rep sees their book's
     // composition and an admin viewing here sees everyone's combined.
     getFunnelStages(),
-    getWagerReport(range.start, range.end, me.id),
+    getWagerReport(resolveReportPeriod(reportChoiceFor(range.key)).period, me.id),
   ]);
 
   const bookTotal = stages.reduce((sum, s) => sum + s.playerCount, 0);
@@ -402,15 +407,15 @@ export default async function StatsPage({
                   "$" +
                   wager.total.toLocaleString(undefined, { maximumFractionDigits: 0 })
                 }
-                sub={`${wager.playerCount} of your players wagered`}
+                sub={`${wager.wagererCount} of your players wagered`}
                 icon={<Wallet size={14} />}
               />
               <Metric
                 label="Average per wagering player"
                 value={
                   "$" +
-                  (wager.playerCount > 0
-                    ? Math.round(wager.total / wager.playerCount)
+                  (wager.wagererCount > 0
+                    ? Math.round(wager.total / wager.wagererCount)
                     : 0
                   ).toLocaleString()
                 }
@@ -431,7 +436,7 @@ export default async function StatsPage({
                 </thead>
                 <tbody>
                   {wager.rows.slice(0, 25).map((r) => (
-                    <tr key={r.playerId} className="border-b border-line last:border-0">
+                    <tr key={r.username} className="border-b border-line last:border-0">
                       <td className="px-4 py-2.5">
                         <span className="font-medium text-ink">{r.handle}</span>
                         <span className="tabular ml-2 text-caption text-ink-subtle">
@@ -440,7 +445,7 @@ export default async function StatsPage({
                       </td>
                       <td className="px-4 py-2.5 text-small text-ink-muted">{r.status}</td>
                       <td className="tabular px-4 py-2.5 text-right text-body font-medium text-ink">
-                        ${r.windowWager.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        ${r.wagered.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </td>
                       <td className="tabular px-4 py-2.5 text-right text-body text-ink-muted">
                         ${r.allTime.toLocaleString(undefined, { maximumFractionDigits: 0 })}

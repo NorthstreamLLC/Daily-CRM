@@ -6,6 +6,7 @@ import {
   getCompanyDeposits,
   getCompanyVip,
   getWagerReport,
+  resolveReportPeriod,
   type CompanyPlayer,
 } from "@/lib/admin";
 import { resolveRange } from "@/lib/ranges";
@@ -29,12 +30,12 @@ export default async function PipelinePage() {
   const [vip, deposits, monthWager] = await Promise.all([
     getCompanyVip(),
     getCompanyDeposits(),
-    getWagerReport(monthRange.start, monthRange.end),
+    getWagerReport(resolveReportPeriod("month").period),
   ]);
 
   // Wager this month for the players sitting at VIP Transferred - the clearest
   // measure of whether transfers are turning into money.
-  const monthByPlayer = new Map(monthWager.rows.map((r) => [r.playerId, r.windowWager]));
+  const monthByPlayer = new Map(monthWager.rows.map((r) => [r.playerId, r.wagered]));
   const vipMonthWager = vip.reduce((a, p) => a + (monthByPlayer.get(p.id) ?? 0), 0);
 
   const stalled = vip.filter((p) => {
@@ -73,7 +74,7 @@ export default async function PipelinePage() {
           value={monthWager.total}
           icon={<Wallet size={14} />}
           money
-          sub={`${monthWager.playerCount} players`}
+          sub={`${monthWager.wagererCount} players`}
         />
         <Stat
           label="From VIP transfers"

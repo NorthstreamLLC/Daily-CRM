@@ -937,6 +937,8 @@ export type PeriodPlayer = {
   playerId: string | null;
   ownerName: string | null;
   status: string | null;
+  /** Recognised as wagering before the CRM existed - hidden, not deleted. */
+  ignored: boolean;
 };
 
 export type PeriodPlayers = {
@@ -954,8 +956,9 @@ export function resolvePeriodKey(choice: string, now = new Date()) {
   }
   if (choice === "day") return { type: "day" as const, start: isoDay(utcDayStart(now)) };
   if (choice === "week") return { type: "week" as const, start: isoDay(utcWeekStart(now)) };
-  if (choice === "all") return { type: "all" as const, start: "1970-01-01" };
-  return { type: "month" as const, start: isoDay(utcMonthStart(now)) };
+  if (choice === "month") return { type: "month" as const, start: isoDay(utcMonthStart(now)) };
+  // All time is the default: it is the figure that does not move under you.
+  return { type: "all" as const, start: "1970-01-01" };
 }
 
 /**
@@ -987,6 +990,7 @@ export async function getPeriodPlayers(
     player_id: string | null;
     owner_name: string | null;
     status: string | null;
+    ignored: boolean;
     total_count: number;
   }[];
 
@@ -1000,6 +1004,7 @@ export async function getPeriodPlayers(
       playerId: r.player_id,
       ownerName: r.owner_name,
       status: r.status,
+      ignored: Boolean(r.ignored),
     })),
     total,
     page: safePage,
@@ -1010,25 +1015,6 @@ export async function getPeriodPlayers(
 
 /* ------------------------------------------------------------ Wager report */
 
-export type WagerReportRow = {
-  playerId: string;
-  handle: string;
-  reference: string;
-  roobetUsername: string | null;
-  ownerName: string;
-  status: string;
-  windowWager: number;
-  allTime: number;
-};
-
-export type WagerReport = {
-  rows: WagerReportRow[];
-  total: number;
-  playerCount: number;
-  /** Wager in the window from usernames in nobody's book. */
-  unclaimedTotal: number;
-};
-
 /**
  * PER-PLAYER WAGER FOR A DATE WINDOW.
  *
@@ -1037,70 +1023,190 @@ export type WagerReport = {
  * their own players, an admin sees everyone - so the same function serves both
  * the Stats page and the Admin wager tab.
  */
+/**
+ * THE REPORT - now covering everyone.
+ *
+ * It used to read wager_deltas: the difference between two snapshots. That is
+ * why it showed $0 next to $81m, and why it only ever counted players already
+ * in a book. It now reads the same stored period facts as everything else on
+ * the page, and includes unowned usernames, because money that arrived is
+ * money that arrived.
+ *
+ * Periods, not arbitrary dates. Roobet is asked for whole UTC windows, so
+ * those are the windows that can be answered exactly. A year is just every
+ * month in it added up.
+ */
+export type ReportPeriod =
+  | { kind: "all" }
+  | { kind: "day"; start: string }
+  | { kind: "week"; start: string }
+  | { kind: "month"; from: string; to: string };
+
+/**
+ * The stats page offers rolling windows (7 days, 30 days) but Roobet is only
+ * ever asked for whole UTC periods, so those are the only windows that can be
+ * answered exactly. This maps a rolling choice onto the nearest true period
+ * rather than inventing a figure - the label on screen says which one it is.
+ */
+export function reportChoiceFor(rangeKey: string): string {
+  switch (rangeKey) {
+    case "today":
+      return "day";
+    case "7d":
+      return "week";
+    case "30d":
+    case "mtd":
+      return "month";
+    case "90d":
+      return "quarter";
+    case "ytd":
+      return "ytd";
+    case "all":
+      return "all";
+    default:
+      return "month";
+  }
+}
+
+export function resolveReportPeriod(choice: string, now = new Date()): {
+  period: ReportPeriod;
+  label: string;
+  slug: string;
+} {
+  const year = now.getUTCFullYear();
+
+  if (/^\d{4}-\d{2}$/.test(choice)) {
+    const label = `${MONTH_NAMES[Number(choice.slice(5, 7)) - 1]} ${choice.slice(0, 4)}`;
+    return {
+      period: { kind: "month", from: `${choice}-01`, to: `${choice}-01` },
+      label,
+      slug: choice,
+    };
+  }
+
+  if (/^\d{4}$/.test(choice)) {
+    return {
+      period: { kind: "month", from: `${choice}-01-01`, to: `${choice}-12-01` },
+      label: choice,
+      slug: choice,
+    };
+  }
+
+  if (choice === "day") {
+    const start = isoDay(utcDayStart(now));
+    return { period: { kind: "day", start }, label: "Today", slug: `day-${start}` };
+  }
+
+  if (choice === "week") {
+    const start = isoDay(utcWeekStart(now));
+    return { period: { kind: "week", start }, label: "This week", slug: `week-${start}` };
+  }
+
+  if (choice === "quarter") {
+    const to = utcMonthStart(now);
+    const from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - 2, 1));
+    return {
+      period: { kind: "month", from: isoDay(from), to: isoDay(to) },
+      label: "Last 3 months",
+      slug: "last-3-months",
+    };
+  }
+
+  if (choice === "month") {
+    const start = isoDay(utcMonthStart(now));
+    return {
+      period: { kind: "month", from: start, to: start },
+      label: "This month",
+      slug: start.slice(0, 7),
+    };
+  }
+
+  if (choice === "ytd") {
+    return {
+      period: { kind: "month", from: `${year}-01-01`, to: `${year}-12-01` },
+      label: `${year} to date`,
+      slug: `${year}-ytd`,
+    };
+  }
+
+  return { period: { kind: "all" }, label: "All time", slug: "all-time" };
+}
+
+export type ReportRow = {
+  username: string;
+  wagered: number;
+  sources: string;
+  playerId: string | null;
+  reference: string | null;
+  handle: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  status: string | null;
+  allTime: number;
+};
+
+export type WagerReport = {
+  rows: ReportRow[];
+  total: number;
+  claimedTotal: number;
+  unclaimedTotal: number;
+  wagererCount: number;
+};
+
 export async function getWagerReport(
-  start: Date | null,
-  end: Date | null,
-  ownerId?: string
+  period: ReportPeriod,
+  ownerId?: string,
+  limit = 5000
 ): Promise<WagerReport> {
   const supabase = createClient();
-  const from = (start ?? new Date("2020-01-01")).toISOString();
-  const to = (end ?? new Date()).toISOString();
 
-  type Delta = { player_id: string; owner_id: string; delta: number };
+  const args =
+    period.kind === "all"
+      ? { p_type: "all", p_from: "1970-01-01", p_to: null }
+      : period.kind === "day"
+        ? { p_type: "day", p_from: period.start, p_to: null }
+        : period.kind === "week"
+          ? { p_type: "week", p_from: period.start, p_to: null }
+          : { p_type: "month", p_from: period.from, p_to: period.to };
 
-  const [{ data: deltas }, { data: players }, { data: users }, { data: extDeltas }] =
-    await Promise.all([
-      supabase
-        .rpc("wager_deltas", { p_start: from, p_end: to })
-        .then((r) => (r.data ?? []) as Delta[])
-        .then((data) => ({ data })),
-      supabase
-        .from("players")
-        .select("id, handle, reference, roobet_username, status, owner_id, weighted_wager")
-        .limit(100000),
-      supabase.from("users").select("id, name"),
-      supabase
-        .rpc("wager_external_deltas", { p_start: from, p_end: to })
-        .then((r) => (r.data ?? []) as { username: string; delta: number }[])
-        .then((data) => ({ data })),
-    ]);
+  const { data } = await supabase.rpc("wager_report_rows", {
+    ...args,
+    p_owner: ownerId ?? null,
+    p_limit: limit,
+  });
 
-  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
-  const byId = new Map((players ?? []).map((p) => [p.id as string, p]));
+  const raw = (data ?? []) as {
+    username: string;
+    wagered: number;
+    sources: string;
+    player_id: string | null;
+    reference: string | null;
+    handle: string | null;
+    owner_id: string | null;
+    owner_name: string | null;
+    status: string | null;
+    all_time: number;
+  }[];
 
-  const claimed = new Set(
-    (players ?? [])
-      .filter((p) => p.roobet_username?.trim())
-      .map((p) => p.roobet_username!.trim().toLowerCase())
-  );
-
-  const rows: WagerReportRow[] = (deltas ?? [])
-    .filter((d) => Number(d.delta) > 0)
-    .filter((d) => !ownerId || d.owner_id === ownerId)
-    .map((d) => {
-      const p = byId.get(d.player_id);
-      return {
-        playerId: d.player_id,
-        handle: p?.handle ?? "—",
-        reference: p?.reference ?? "",
-        roobetUsername: p?.roobet_username ?? null,
-        ownerName: names.get(d.owner_id) ?? "—",
-        status: p?.status ?? "—",
-        windowWager: Number(d.delta),
-        allTime: Number(p?.weighted_wager ?? 0),
-      };
-    })
-    .sort((a, b) => b.windowWager - a.windowWager);
-
-  const unclaimedTotal = (extDeltas ?? [])
-    .filter((d) => !claimed.has(String(d.username).toLowerCase()))
-    .reduce((a, d) => a + Number(d.delta), 0);
+  const rows: ReportRow[] = raw.map((r) => ({
+    username: r.username,
+    wagered: Number(r.wagered),
+    sources: r.sources,
+    playerId: r.player_id,
+    reference: r.reference,
+    handle: r.handle,
+    ownerId: r.owner_id,
+    ownerName: r.owner_name,
+    status: r.status,
+    allTime: Number(r.all_time),
+  }));
 
   return {
     rows,
-    total: rows.reduce((a, r) => a + r.windowWager, 0),
-    playerCount: rows.length,
-    unclaimedTotal,
+    total: rows.reduce((a, r) => a + r.wagered, 0),
+    claimedTotal: rows.filter((r) => r.ownerId).reduce((a, r) => a + r.wagered, 0),
+    unclaimedTotal: rows.filter((r) => !r.ownerId).reduce((a, r) => a + r.wagered, 0),
+    wagererCount: rows.length,
   };
 }
 

@@ -769,6 +769,53 @@ export async function retireUnclaimedWagerers(): Promise<AdminState> {
   };
 }
 
+/**
+ * Mark one wagerer as pre-existing, or put them back.
+ *
+ * Same idea as the bulk action, one row at a time - which is what makes it
+ * usable from the main player list rather than needing a separate panel. It
+ * hides rather than deletes: the money stays in every company total.
+ */
+export async function setWagererPreExisting(
+  username: string,
+  preExisting: boolean
+): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const clean = username.trim();
+  if (!clean) return { error: "No username given." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc(
+    preExisting ? "retire_one_wagerer" : "unretire_one_wagerer",
+    { p_username: clean }
+  );
+
+  if (error) {
+    return {
+      error: /does not exist|schema cache/i.test(error.message)
+        ? "Run migration 20260812000019_wager_report.sql first."
+        : error.message,
+    };
+  }
+
+  await audit(me.id, preExisting ? "wagerer_pre_existing" : "wagerer_restored", null, {
+    username: clean,
+  });
+  refresh();
+
+  return {
+    message: preExisting
+      ? `${clean} marked pre-existing.`
+      : `${clean} back on the list.`,
+  };
+}
+
 /* ------------------------------------------------------------ Wager sources */
 
 /**

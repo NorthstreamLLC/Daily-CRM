@@ -67,7 +67,7 @@ export function TaskRow({
     return (
       <div
         role="status"
-        className="flex items-center gap-3 rounded-card border border-line-strong bg-surface
+        className="flex items-center gap-3 rounded-card border border-line-heavy bg-surface
                    px-4 py-2.5 text-small text-ink-muted"
       >
         <span className="flex h-5 w-5 items-center justify-center rounded-full bg-success-soft text-success">
@@ -98,7 +98,7 @@ export function TaskRow({
     <div
       className={cn(
         "overflow-hidden rounded-card border bg-surface transition-colors duration-fast",
-        open ? "border-accent/50" : "border-line-strong hover:border-ink-subtle/40"
+        open ? "border-accent/60" : "border-line-heavy hover:border-ink-subtle"
       )}
     >
       <div

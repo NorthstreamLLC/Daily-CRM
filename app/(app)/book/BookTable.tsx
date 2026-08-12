@@ -238,7 +238,7 @@ export function BookTable({
       <div className="hidden overflow-hidden rounded-card border border-line bg-surface shadow-card lg:block">
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 z-10">
-            <tr className="border-b-2 border-line-strong bg-sunken">
+            <tr className="border-b-2 border-line-heavy bg-sunken">
               <th scope="col" className="w-11 px-3 py-2.5">
                 {!readOnly && (
                   <Checkbox

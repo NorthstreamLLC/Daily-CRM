@@ -5,18 +5,15 @@ import { getMe } from "@/lib/queries";
 import {
   getPeriodPlayers,
   getRepPeriods,
+  getTeam,
   getWagerOverview,
   getWagerPeriods,
   getWagerReport,
   resolvePeriodKey,
+  resolveReportPeriod,
 } from "@/lib/admin";
-import { resolveRange } from "@/lib/ranges";
-import { ymdInZone } from "@/lib/time";
-import { RangePicker } from "../../RangePicker";
-import { UnclaimedSearch } from "./UnclaimedSearch";
-import { UnclaimedPager } from "./UnclaimedPager";
-import { RetireUnclaimed } from "./RetireUnclaimed";
 import { getChurn } from "@/lib/churn";
+import { ReportControls } from "./ReportControls";
 import { ChurnList } from "../../ChurnList";
 import { PeriodPlayers } from "./PeriodPlayers";
 import { AutoSync } from "./AutoSync";
@@ -27,11 +24,17 @@ const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 /**
- * WAGER.
+ * WAGER - the company's numbers.
  *
- * What every rep's book actually produces, in dollars wagered. All-time is the
- * sum of current leaderboard totals; the day/week/month figures are movement
- * between snapshots, so they only accumulate once syncing runs regularly.
+ * Every figure here is a fact Roobet returned for an exact UTC window, not a
+ * difference between two readings. That is what makes "this month" right on
+ * the first sync, and what lets the same number appear in more than one place
+ * without the two disagreeing.
+ *
+ * There is deliberately ONE per-player list. There used to be two - an
+ * unclaimed panel beside a claimed one - which invited the question of which
+ * was correct, and the honest answer was neither alone. Claimed and unclaimed
+ * now sit in the same list, and a name is recognised where it sits.
  */
 export default async function WagerPage({
   searchParams,
@@ -46,26 +49,24 @@ export default async function WagerPage({
     return Array.isArray(v) ? v[0] : v;
   };
 
-  const range = resolveRange(
-    { period: one("period"), from: one("from"), to: one("to") },
-    me.timezone,
-    "30d"
-  );
-
-  const unclaimedSearch = one("wq") ?? "";
-  const unclaimedPage = Math.max(1, Number(one("wp")) || 1);
-
-  // Per-player period browser: pp = period, pq = search, ppg = page.
-  const periodChoice = one("pp") ?? "month";
+  // Per-player list: pp = period, pq = search, ppg = page, pre = show retired.
+  // Defaults to all time, the figure that does not move under you.
+  const periodChoice = one("pp") ?? "all";
   const periodKey = resolvePeriodKey(periodChoice);
   const periodSearch = one("pq") ?? "";
   const periodPage = Math.max(1, Number(one("ppg")) || 1);
 
-  const [overview, report, churn, periods] = await Promise.all([
-    getWagerOverview(me.timezone, unclaimedSearch, unclaimedPage),
-    getWagerReport(range.start, range.end),
+  // Report: rp = period, ro = rep filter.
+  const reportChoice = one("rp") ?? "all";
+  const reportOwner = one("ro") ?? "";
+  const reportPeriod = resolveReportPeriod(reportChoice);
+
+  const [overview, report, churn, periods, team] = await Promise.all([
+    getWagerOverview(me.timezone, "", 1),
+    getWagerReport(reportPeriod.period, reportOwner || undefined, 500),
     getChurn(me.timezone),
     getWagerPeriods(),
+    getTeam(),
   ]);
 
   const repPeriods = await getRepPeriods();
@@ -77,12 +78,14 @@ export default async function WagerPage({
     periodPage
   );
 
+  /* Every dollar figure on this page comes from wager_periods. The ledger
+     (wager_external) is still read for counts and the retire action, but not
+     for money - two sources for one total is how the page ended up showing
+     $80,987,664 in one place and $81,066,311 in another. */
   const { totals, unclaimed, snapshotCount, signals } = overview;
 
-  const reportQuery = new URLSearchParams();
-  if (range.start) reportQuery.set("from", range.start.toISOString());
-  if (range.end) reportQuery.set("to", range.end.toISOString());
-  reportQuery.set("label", range.label);
+  const reportQuery = new URLSearchParams({ period: reportChoice });
+  if (reportOwner) reportQuery.set("owner", reportOwner);
 
   const activeReps = repPeriods.reps.filter((r) => r.all > 0 || r.players > 0);
 
@@ -227,91 +230,6 @@ export default async function WagerPage({
             </section>
           )}
 
-          {/* Who wagered it */}
-          <section className="mb-8">
-            <SectionHeader
-              title="Wager by player"
-              hint="Every wagerer for the chosen period, biggest first. Claimed and unclaimed together, so this always adds up to the total above."
-            />
-            <PeriodPlayers
-              rows={periodPlayers.rows}
-              total={periodPlayers.total}
-              page={periodPlayers.page}
-              pages={periodPlayers.pages}
-              choice={periodChoice}
-              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
-            />
-          </section>
-
-          {/* Unclaimed wagerers */}
-          <section className="mb-8">
-            <SectionHeader
-              title="Unclaimed wagerers"
-              count={unclaimed.count}
-              hint={`Wagering on your codes but in nobody's book — ${money(
-                unclaimed.total
-              )} of lifetime wager with no owner. Add one to a book with this exact Roobet username and their full history attaches to that player automatically.`}
-              action={
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <UnclaimedSearch placeholder="Search Roobet username" />
-                  {unclaimed.count > 0 && !unclaimedSearch && (
-                    <RetireUnclaimed count={unclaimed.count} />
-                  )}
-                </div>
-              }
-            />
-            {unclaimed.sample.length === 0 ? (
-              <EmptyState
-                icon={<Users size={18} />}
-                title={
-                  unclaimedSearch
-                    ? `No unclaimed username matches "${unclaimedSearch}"`
-                    : "Everyone wagering is in a book"
-                }
-                body={
-                  unclaimedSearch
-                    ? "They may already be in someone's book — check the Book page."
-                    : "New names appear here as they show up on your codes."
-                }
-              />
-            ) : (
-              <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-card no-scrollbar">
-                <table className="w-full min-w-[560px] text-left">
-                  <thead>
-                    <tr className="border-b border-line bg-sunken">
-                      <Th className="w-10">#</Th>
-                      <Th>Roobet username</Th>
-                      <Th>Code</Th>
-                      <Th align="right">This month</Th>
-                      <Th align="right">All time</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {unclaimed.sample.map((u, i) => (
-                      <tr key={u.username} className="border-b border-line last:border-0">
-                        <td className="tabular px-4 py-2.5 text-small text-ink-subtle">
-                          {i + 1}
-                        </td>
-                        <td className="px-4 py-2.5 text-body font-medium text-ink">
-                          {u.username}
-                        </td>
-                        <td className="px-4 py-2.5 text-small text-ink-muted">{u.sources}</td>
-                        <Td muted>{money(u.month)}</Td>
-                        <Td strong>{money(u.allTime)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <UnclaimedPager
-                  page={unclaimed.page}
-                  pageCount={unclaimed.pageCount}
-                  total={unclaimed.matching}
-                  shown={unclaimed.sample.length}
-                />
-              </div>
-            )}
-          </section>
-
           {/* Per rep */}
           <section className="mb-8">
             <SectionHeader
@@ -384,6 +302,23 @@ export default async function WagerPage({
                 </table>
               </div>
             )}
+          </section>
+
+          {/* Who wagered it */}
+          <section className="mb-8">
+            <SectionHeader
+              title="Wager by player"
+              hint="Every wagerer for the chosen period, biggest first. Claimed and unclaimed together, so this always adds up to the total above."
+            />
+            <PeriodPlayers
+              rows={periodPlayers.rows}
+              total={periodPlayers.total}
+              page={periodPlayers.page}
+              pages={periodPlayers.pages}
+              choice={periodChoice}
+              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
+              unclaimedCount={unclaimed.count}
+            />
           </section>
 
           {/* Falling away - the company view */}
@@ -610,11 +545,11 @@ export default async function WagerPage({
             </div>
           </section>
 
-          {/* Per-player report for any date window */}
+          {/* The exportable report */}
           <section className="mb-8">
             <SectionHeader
               title="Wager report"
-              hint="Per player, between any two dates. This is the weekly and monthly review — pick a window, read it, export it."
+              hint="Every wagerer for a whole UTC period — in a book or not. Pick a window, filter to a rep, export it."
               action={
                 <a
                   href={`/api/wager-report?${reportQuery.toString()}`}
@@ -628,71 +563,98 @@ export default async function WagerPage({
               }
             />
 
-            <RangePicker range={range} today={ymdInZone(new Date(), me.timezone)} />
+            <ReportControls
+              choice={reportChoice}
+              owner={reportOwner}
+              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
+              years={Array.from(
+                new Set(periods.months.map((m) => m.month.slice(0, 4)))
+              ).sort((a, b) => b.localeCompare(a))}
+              reps={team.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }))}
+            />
 
             <div className="mb-3 grid gap-3 sm:grid-cols-3">
-              <Total label={`${range.label} — assigned players`} value={report.total} />
+              <Total label={`${reportPeriod.label} — total`} value={report.total} emphasis />
+              <Total label="In a rep's book" value={report.claimedTotal} />
               <Total
-                label="Unassigned in window"
+                label="No owner"
                 value={report.unclaimedTotal}
-                plainSub={`${unclaimed.count.toLocaleString()} usernames`}
-              />
-              <Total
-                label="Players who wagered"
-                value={report.playerCount}
-                plain
+                plainSub={`${report.wagererCount.toLocaleString()} wagerers in this window`}
               />
             </div>
 
             {report.rows.length === 0 ? (
               <EmptyState
                 icon={<Wallet size={18} />}
-                title={`No assigned player wagered in ${range.label.toLowerCase()}`}
-                body="Either the window is quiet, or the wagering is all from usernames nobody owns yet — see Unclaimed wagerers above."
+                title={`Nothing wagered in ${reportPeriod.label.toLowerCase()}`}
+                body={
+                  reportOwner
+                    ? "No player in this rep's book wagered in this window."
+                    : "Run a sync, or use the backfill in Settings to load months from before you started syncing."
+                }
               />
             ) : (
-              <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-card no-scrollbar">
-                <table className="w-full min-w-[760px] text-left">
+              <div className="overflow-x-auto rounded-card border border-line-strong bg-surface shadow-card no-scrollbar">
+                <table className="w-full min-w-[820px] text-left">
                   <thead>
-                    <tr className="border-b border-line bg-sunken">
+                    <tr className="border-b-2 border-line-heavy bg-sunken">
                       <Th className="w-10">#</Th>
-                      <Th>Player</Th>
                       <Th>Roobet username</Th>
+                      <Th>Player</Th>
                       <Th>Rep</Th>
                       <Th>Status</Th>
-                      <Th align="right">{range.label}</Th>
+                      <Th align="right">{reportPeriod.label}</Th>
                       <Th align="right">All time</Th>
                     </tr>
                   </thead>
                   <tbody>
                     {report.rows.slice(0, 100).map((r, i) => (
-                      <tr key={r.playerId} className="border-b border-line last:border-0">
-                        <td className="tabular px-4 py-2.5 text-small text-ink-subtle">
+                      <tr
+                        key={r.username}
+                        className={cn(
+                          "border-b border-line-heavy last:border-0",
+                          i % 2 === 1 && "bg-sunken/40"
+                        )}
+                      >
+                        <td className="tabular px-4 py-2 text-caption text-ink-subtle">
                           {i + 1}
                         </td>
-                        <td className="px-4 py-2.5">
-                          <span className="font-medium text-ink">{r.handle}</span>
-                          <span className="tabular ml-2 text-caption text-ink-subtle">
-                            {r.reference}
-                          </span>
+                        <td className="px-4 py-2 text-body font-medium text-ink">
+                          {r.playerId ? (
+                            <Link
+                              href={`/book?player=${r.playerId}`}
+                              className="text-accent underline-offset-2 hover:underline"
+                            >
+                              {r.username}
+                            </Link>
+                          ) : (
+                            r.username
+                          )}
                         </td>
-                        <td className="px-4 py-2.5 text-small text-ink-muted">
-                          {r.roobetUsername ?? "—"}
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.handle ?? "—"}
+                          {r.reference && (
+                            <span className="tabular ml-2 text-caption text-ink-subtle">
+                              {r.reference}
+                            </span>
+                          )}
                         </td>
-                        <td className="px-4 py-2.5 text-small text-ink-muted">
-                          {r.ownerName}
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.ownerName ?? "—"}
                         </td>
-                        <td className="px-4 py-2.5 text-small text-ink-muted">{r.status}</td>
-                        <Td strong>{money(r.windowWager)}</Td>
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.status ?? "—"}
+                        </td>
+                        <Td strong>{money(r.wagered)}</Td>
                         <Td muted>{money(r.allTime)}</Td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 {report.rows.length > 100 && (
-                  <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
-                    Showing the top 100 of {report.rows.length.toLocaleString()}. Export
-                    the CSV for the full list.
+                  <p className="border-t border-line-strong px-4 py-2.5 text-small text-ink-muted">
+                    Showing the top 100 of {report.rows.length.toLocaleString()}. The CSV
+                    has every row.
                   </p>
                 )}
               </div>

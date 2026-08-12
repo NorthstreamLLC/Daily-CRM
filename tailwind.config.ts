@@ -25,6 +25,7 @@ const config: Config = {
 
         line: v("line"),
         "line-strong": v("line-strong"),
+        "line-heavy": v("line-heavy"),
 
         ink: v("ink"),
         "ink-muted": v("ink-muted"),

@@ -1,23 +1,30 @@
 import { NextResponse } from "next/server";
 import { getMe } from "@/lib/queries";
-import { getWagerReport } from "@/lib/admin";
+import { getWagerReport, resolveReportPeriod } from "@/lib/admin";
 import { toCsv, type Row } from "@/lib/csv";
 
 /**
  * WAGER REPORT AS CSV.
  *
- * The weekly and monthly review, downloadable. Row Level Security scopes the
- * underlying query, so a rep exporting this gets their own players and an
- * admin gets everyone - the URL cannot widen it.
+ * Every wagerer for a period, not just the ones in a book. A username nobody
+ * owns exports with a blank rep rather than being dropped - it is still money
+ * that arrived on our codes, and leaving it out of the export was how the
+ * spreadsheet totals stopped matching the affiliate panel.
+ *
+ * Periods only, no arbitrary dates: Roobet is asked for whole UTC windows, so
+ * those are the windows that can be answered as fact rather than estimated.
+ *
+ * A rep is pinned to their own players whatever the URL says.
  */
 
 const COLUMNS = [
+  { key: "username", label: "Roobet Username" },
   { key: "reference", label: "Reference" },
   { key: "handle", label: "Player" },
-  { key: "roobet", label: "Roobet Username" },
   { key: "owner", label: "Rep" },
   { key: "status", label: "Status" },
-  { key: "window", label: "Wagered In Period" },
+  { key: "code", label: "Code" },
+  { key: "period", label: "Wagered In Period" },
   { key: "allTime", label: "Wagered All Time" },
 ];
 
@@ -26,42 +33,36 @@ export async function GET(request: Request) {
   if (!me) return new NextResponse("Not signed in", { status: 401 });
 
   const url = new URL(request.url);
-  const fromRaw = url.searchParams.get("from");
-  const toRaw = url.searchParams.get("to");
-  const label = url.searchParams.get("label") ?? "period";
+  const choice = url.searchParams.get("period") ?? "all";
+  const ownerParam = url.searchParams.get("owner") ?? "";
 
-  const start = fromRaw ? new Date(fromRaw) : null;
-  const end = toRaw ? new Date(toRaw) : null;
+  const { period, label, slug } = resolveReportPeriod(choice);
 
-  if ((start && isNaN(start.getTime())) || (end && isNaN(end.getTime()))) {
-    return new NextResponse("Bad date range", { status: 400 });
-  }
+  // An admin may filter to one rep; a rep is always scoped to themselves.
+  const owner = me.role === "admin" ? ownerParam || undefined : me.id;
 
-  // A rep is pinned to their own players whatever the URL says.
-  const report = await getWagerReport(
-    start,
-    end,
-    me.role === "admin" ? undefined : me.id
-  );
+  const report = await getWagerReport(period, owner, 100000);
 
   const rows: Row[] = report.rows.map((r) => ({
-    reference: r.reference,
-    handle: r.handle,
-    roobet: r.roobetUsername ?? "",
-    owner: r.ownerName,
-    status: r.status,
-    window: r.windowWager.toFixed(2),
+    username: r.username,
+    reference: r.reference ?? "",
+    handle: r.handle ?? "",
+    owner: r.ownerName ?? "",
+    status: r.status ?? "",
+    code: r.sources ?? "",
+    period: r.wagered.toFixed(2),
     allTime: r.allTime.toFixed(2),
   }));
 
   const stamp = new Date().toISOString().slice(0, 10);
-  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
   return new NextResponse(toCsv(COLUMNS, rows), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="wager-${slug}-${stamp}.csv"`,
       "Cache-Control": "no-store",
+      // Not sensitive, but it is a full book export - keep it out of caches.
+      "X-Report-Label": label,
     },
   });
 }

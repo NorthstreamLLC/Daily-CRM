@@ -15,8 +15,13 @@
   --surface: 255 255 255;
   --sunken: 241 243 246;
 
-  --line: 229 232 237;
-  --line-strong: 207 213 222;
+  /* Three weights, not two. line separates rows inside a card; line-strong
+     draws the card and the header rule; line-heavy is the visible grid on
+     dense tables and the queue, where the whole point is telling one row from
+     the next at a glance. */
+  --line: 222 226 233;
+  --line-strong: 189 196 208;
+  --line-heavy: 160 169 185;
 
   --ink: 20 25 34;
   --ink-muted: 90 100 114;
@@ -41,8 +46,9 @@
   --surface: 22 28 38;
   --sunken: 28 36 49;
 
-  --line: 38 48 64;
-  --line-strong: 56 68 88;
+  --line: 42 53 70;
+  --line-strong: 64 78 100;
+  --line-heavy: 88 104 130;
 
   --ink: 231 235 241;
   --ink-muted: 154 165 181;
