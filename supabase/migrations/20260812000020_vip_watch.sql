@@ -3,7 +3,8 @@
 --
 -- HOW TO RUN
 --   Supabase dashboard > SQL Editor > New query > paste this whole file > Run.
---   Safe to run more than once. Needs 017 and 019 first.
+--   Safe to run more than once. Needs 017 (wager_periods). It does NOT depend
+--   on 019, so 019 and 020 can be pasted into one query window in any order.
 --
 -- TWO THINGS HERE
 --

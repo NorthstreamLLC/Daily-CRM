@@ -708,3 +708,137 @@ function watchError(message: string) {
     ? "Run migration 20260812000020_vip_watch.sql first."
     : message;
 }
+
+
+/* ------------------------------------------------------------- Message log */
+
+export type MessageState = { error?: string; message?: string };
+
+const CHANNELS = ["discord", "telegram", "twitter", "email", "sms", "call", "other"];
+
+/**
+ * Log what was said to a player.
+ *
+ * An outbound message counts as contact - the database trigger moves
+ * last_contact_at forward - so a rep logs the conversation once instead of
+ * logging it and then separately ticking the task. That double entry is
+ * exactly what the spreadsheet forced.
+ *
+ * Row Level Security decides who may log against whom.
+ */
+export async function logMessage(
+  playerId: string,
+  body: string,
+  channel = "other",
+  direction: "out" | "in" = "out",
+  occurredAt?: string
+): Promise<MessageState> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const text = body.trim();
+  if (!text) return { error: "Nothing to log." };
+  if (text.length > 5000) return { error: "That is too long to store as one message." };
+
+  const supabase = createClient();
+
+  const when = occurredAt ? new Date(occurredAt) : new Date();
+  if (Number.isNaN(when.getTime())) return { error: "That date is not valid." };
+  // A message cannot have been sent in the future.
+  const stamp = (when > new Date() ? new Date() : when).toISOString();
+
+  const { error } = await supabase.from("player_messages").insert({
+    player_id: playerId,
+    user_id: me.id,
+    direction,
+    channel: CHANNELS.includes(channel) ? channel : "other",
+    body: text,
+    occurred_at: stamp,
+  });
+
+  if (error) {
+    return {
+      error: /does not exist|schema cache/i.test(error.message)
+        ? "Run migration 20260812000021_messages.sql first."
+        : error.message,
+    };
+  }
+
+  /* The timeline is the record of what happened; the message log is what was
+     said. Both want this event, and writing it here rather than in a trigger
+     keeps activity_log's meaning - things a person did - intact.
+  
+     Counted once per player per day, not once per message. Three messages in
+     an afternoon is one player worked, and every stat on the Stats page reads
+     task_completed as "touches" - so writing one per message would quietly
+     inflate the number the team is measured on. */
+  if (direction === "out") {
+    const dayStart = startOfDayUtc(me.timezone).toISOString();
+
+    const { data: already } = await supabase
+      .from("activity_log")
+      .select("id")
+      .eq("player_id", playerId)
+      .eq("user_id", me.id)
+      .eq("event_type", "task_completed")
+      .gte("occurred_at", dayStart)
+      .limit(1)
+      .maybeSingle();
+
+    await supabase.from("activity_log").insert({
+      player_id: playerId,
+      user_id: me.id,
+      event_type: already ? "outreach" : "task_completed",
+      metadata: { via: "message_log", channel },
+    });
+  }
+
+  refresh();
+  return { message: direction === "out" ? "Logged, and marked as contacted." : "Reply logged." };
+}
+
+/** Correct a message. Keeps the original time and marks it edited. */
+export async function editMessage(id: string, body: string): Promise<MessageState> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const text = body.trim();
+  if (!text) return { error: "A message cannot be emptied - delete it instead." };
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("player_messages")
+    .update({ body: text, edited_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+  refresh();
+  return { message: "Message updated." };
+}
+
+/** Remove a message logged by mistake. */
+export async function deleteMessage(id: string): Promise<MessageState> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("player_messages").delete().eq("id", id);
+
+  if (error) return { error: error.message };
+  refresh();
+  return { message: "Message removed." };
+}
+
+/** The team's snippets, plus this rep's own. */
+export async function getTemplates(): Promise<{ id: string; name: string; body: string }[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("message_templates")
+    .select("id, name, body")
+    .eq("active", true)
+    .order("sort_order")
+    .order("name");
+
+  if (error) return [];
+  return (data ?? []) as { id: string; name: string; body: string }[];
+}

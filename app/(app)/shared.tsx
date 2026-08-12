@@ -13,6 +13,7 @@ import {
   updatePlayerField,
 } from "./actions";
 import { formatDate, formatDateTime, relativeDays } from "@/lib/time";
+import { MessageLog } from "./MessageLog";
 
 export type StatusOption = { name: string };
 
@@ -257,7 +258,7 @@ export function PlayerDetail({
   timezone: string;
   onClose?: () => void;
 }) {
-  const [tab, setTab] = useState<"details" | "history">("details");
+  const [tab, setTab] = useState<"details" | "messages" | "history">("details");
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -281,6 +282,9 @@ export function PlayerDetail({
         <TabButton active={tab === "details"} onClick={() => setTab("details")}>
           <MessageSquare size={13} /> Details &amp; notes
         </TabButton>
+        <TabButton active={tab === "messages"} onClick={() => setTab("messages")}>
+          <MessageSquare size={13} /> Messages
+        </TabButton>
         <TabButton active={tab === "history"} onClick={loadHistory}>
           <History size={13} /> History
         </TabButton>
@@ -297,7 +301,15 @@ export function PlayerDetail({
         )}
       </div>
 
-      {tab === "details" ? (
+      {tab === "messages" ? (
+        <div className="p-4">
+          <MessageLog
+            playerId={player.id}
+            timezone={timezone}
+            channelHint={player.source}
+          />
+        </div>
+      ) : tab === "details" ? (
         <div className="grid gap-4 p-4 sm:grid-cols-2">
           <AutoSaveField
             player={player}

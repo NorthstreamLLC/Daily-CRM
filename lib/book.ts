@@ -144,6 +144,56 @@ export type TimelineEvent = {
   metadata: Record<string, unknown> | null;
 };
 
+export type PlayerMessage = {
+  id: string;
+  direction: "out" | "in";
+  channel: string;
+  body: string;
+  occurred_at: string;
+  edited_at: string | null;
+  userId: string;
+  userName: string;
+};
+
+/**
+ * What was actually said, newest first.
+ *
+ * Kept apart from the timeline rather than merged into it. The timeline
+ * answers "what happened to this player"; this answers "what did we say".
+ * Merging them buries a three-line message between six status changes.
+ */
+export async function getPlayerMessages(playerId: string): Promise<PlayerMessage[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from("player_messages")
+    .select("id, direction, channel, body, occurred_at, edited_at, user_id")
+    .eq("player_id", playerId)
+    .order("occurred_at", { ascending: false })
+    .limit(300);
+
+  if (error) {
+    // The table may not exist yet; an empty log is better than a broken panel.
+    if (/does not exist|schema cache/i.test(error.message)) return [];
+    throw error;
+  }
+
+  const ids = Array.from(new Set((data ?? []).map((m) => m.user_id as string)));
+  const { data: users } = await supabase.from("users").select("id, name").in("id", ids);
+  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
+
+  return (data ?? []).map((m) => ({
+    id: m.id as string,
+    direction: m.direction as "out" | "in",
+    channel: m.channel as string,
+    body: m.body as string,
+    occurred_at: m.occurred_at as string,
+    edited_at: m.edited_at as string | null,
+    userId: m.user_id as string,
+    userName: names.get(m.user_id as string) ?? "—",
+  }));
+}
+
 /**
  * One player's full history: every contact, status change and note, newest
  * first. This is what the Activity Log tab was trying to be, except attached
