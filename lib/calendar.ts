@@ -57,8 +57,14 @@ function shiftMonth(ym: string, delta: number): string {
  */
 export async function getCalendarMonth(
   me: Me,
-  monthParam: string | undefined
+  monthParam: string | undefined,
+  /* Whose calendar. An admin may pass another rep's id; a rep is always
+     themselves, enforced by the caller. Without this an admin who carries no
+     players of their own saw an empty month and reasonably concluded the
+     calendar was broken. */
+  ownerId?: string
 ): Promise<CalendarMonth> {
+  const owner = ownerId || me.id;
   const now = new Date();
   const todayYmd = ymdInZone(now, me.timezone);
   const ym = /^\d{4}-\d{2}$/.test(monthParam ?? "")
@@ -93,7 +99,7 @@ export async function getCalendarMonth(
         ? supabase
             .from("players_enriched")
             .select(PLAYER_COLS)
-            .eq("owner_id", me.id)
+            .eq("owner_id", owner)
             .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
             .or(
               `last_contact_at.is.null,next_followup_at.lte.${endToday.toISOString()},missing_roobet.is.true`
@@ -105,7 +111,7 @@ export async function getCalendarMonth(
         ? supabase
             .from("players_enriched")
             .select(PLAYER_COLS)
-            .eq("owner_id", me.id)
+            .eq("owner_id", owner)
             .gt("next_followup_at", scheduledStart.toISOString())
             .lt("next_followup_at", rangeEnd.toISOString())
             .limit(2000)
@@ -113,7 +119,7 @@ export async function getCalendarMonth(
       supabase
         .from("meetings")
         .select("id, title, notes, starts_at, player_id")
-        .eq("user_id", me.id)
+        .eq("user_id", owner)
         .gte("starts_at", rangeStart.toISOString())
         .lt("starts_at", rangeEnd.toISOString())
         .order("starts_at")

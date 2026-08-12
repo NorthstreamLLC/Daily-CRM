@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getMe } from "@/lib/queries";
+import { createClient } from "@/lib/supabase/server";
+import { CalendarOwner } from "./CalendarOwner";
 import { getCalendarMonth, type CalendarDay, type CalendarItem } from "@/lib/calendar";
 import { EmptyState, cn } from "@/components/ui";
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, List } from "@/components/icons";
@@ -42,7 +44,26 @@ export default async function CalendarPage({
   };
 
   const view = one("view") === "list" ? "list" : "month";
-  const month = await getCalendarMonth(me, one("month"));
+
+  /* An admin may look at any rep's schedule; a rep is pinned to their own,
+     whatever the URL says. */
+  const isAdmin = me.role === "admin";
+  const ownerId = (isAdmin ? one("owner") : "") || me.id;
+  const viewingSomeoneElse = ownerId !== me.id;
+
+  const supabase = createClient();
+  const [month, teamRes, ownerRes] = await Promise.all([
+    getCalendarMonth(me, one("month"), ownerId),
+    isAdmin
+      ? supabase.from("users").select("id, name, code").eq("active", true).order("name")
+      : Promise.resolve({ data: null }),
+    viewingSomeoneElse
+      ? supabase.from("users").select("name").eq("id", ownerId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const team = (teamRes.data ?? []) as { id: string; name: string; code: string }[];
+  const ownerName = (ownerRes.data as { name: string } | null)?.name ?? null;
 
   const selectedDay =
     one("day") && month.days.has(one("day")!) ? one("day")! : undefined;
@@ -71,10 +92,20 @@ export default async function CalendarPage({
         <div>
           <h1 className="text-h1 font-semibold tracking-tight text-ink">Calendar</h1>
           <p className="mt-0.5 text-body text-ink-muted">
-            Scheduled follow-ups and your own meetings, in {me.timezone.replace("_", " ")}.
+            {viewingSomeoneElse && ownerName
+              ? `${ownerName}'s scheduled follow-ups`
+              : "Scheduled follow-ups and your own meetings"}
+            , in {me.timezone.replace("_", " ")}.
           </p>
         </div>
-        <AddMeeting defaultDate={selectedDay ?? month.todayYmd} />
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && team.length > 1 && (
+            <CalendarOwner team={team} current={ownerId} meId={me.id} />
+          )}
+          {!viewingSomeoneElse && (
+            <AddMeeting defaultDate={selectedDay ?? month.todayYmd} />
+          )}
+        </div>
       </div>
 
       {/* Month navigation + view switch */}

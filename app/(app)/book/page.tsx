@@ -206,7 +206,13 @@ export default async function BookPage({
             body={
               viewingSomeoneElse
                 ? "Nothing has been added or imported for this person yet."
-                : "Add your first player and they'll appear in today's queue straight away."
+                : isAdmin
+                  ? /* An admin's own book being empty is normal - they carry no
+                       players. Saying "add your first player" here reads as
+                       though the company has none, which is how an empty
+                       personal book gets mistaken for lost data. */
+                    "This is your personal book, and admins usually don't carry players. Use the picker above to open a rep's book, or see everyone in Admin → People."
+                  : "Add your first player and they'll appear in today's queue straight away."
             }
           />
         )
