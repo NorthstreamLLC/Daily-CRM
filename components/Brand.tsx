@@ -30,17 +30,21 @@ export function Mark({
 }
 
 /**
- * Partner logos.
+ * Partner logo.
  *
  * Roobet is where the wager data actually comes from, so it earns its place.
- * The white PackDraw mark needs a dark background, which is why this sits on
- * the shell colour rather than the page.
+ * The mark is gold on dark, which is why this sits on the shell colour rather
+ * than the page. Standing alone it carries the band on its own, so it is sized
+ * to be read rather than noticed.
+ *
+ * (PackDraw sat here too; removed for now. Adding a second mark back means
+ * splitting the width again, so the sizing below would want revisiting.)
  */
 export function PartnerStrip({ className = "" }: { className?: string }) {
   return (
     <div
-      className={`flex items-center justify-center gap-6 rounded-card bg-shell
-                  px-5 py-3.5 ${className}`}
+      className={`flex items-center justify-center rounded-card bg-shell
+                  px-5 py-5 ${className}`}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -48,16 +52,7 @@ export function PartnerStrip({ className = "" }: { className?: string }) {
         alt="Roobet"
         width={806}
         height={300}
-        className="h-5 w-auto opacity-90"
-      />
-      <span className="h-4 w-px bg-shell-line" aria-hidden="true" />
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/packdraw-logo-white.png"
-        alt="PackDraw"
-        width={1920}
-        height={580}
-        className="h-4 w-auto opacity-90"
+        className="h-9 w-auto"
       />
     </div>
   );
