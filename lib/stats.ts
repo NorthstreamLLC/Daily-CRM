@@ -404,9 +404,11 @@ export async function getLeaderboard(
       return data ?? [];
     })(),
 
+    /* Was pulling every player row to count them per rep. Postgres can do
+       that, and returns thirteen rows instead of thousands. */
     (async () => {
-      const { data } = await supabase.from("players").select("owner_id").limit(200000);
-      return data ?? [];
+      const { data } = await supabase.rpc("player_counts_by_owner");
+      return (data ?? []) as { owner_id: string; players: number }[];
     })(),
 
     // Only the players who could possibly be due - far smaller than the book.
@@ -420,8 +422,9 @@ export async function getLeaderboard(
     })(),
   ]);
 
-  const bookSize = new Map<string, number>();
-  for (const p of book) bookSize.set(p.owner_id, (bookSize.get(p.owner_id) ?? 0) + 1);
+  const bookSize = new Map<string, number>(
+    book.map((row) => [row.owner_id, Number(row.players)])
+  );
 
   const vipAllTime = new Map<string, number>();
   for (const e of allVipEvents) {

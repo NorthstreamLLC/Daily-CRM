@@ -61,22 +61,19 @@ export default async function WagerPage({
   const reportOwner = one("ro") ?? "";
   const reportPeriod = resolveReportPeriod(reportChoice);
 
-  const [overview, report, churn, periods, team] = await Promise.all([
-    getWagerOverview(me.timezone, "", 1),
-    getWagerReport(reportPeriod.period, reportOwner || undefined, 500),
-    getChurn(me.timezone),
-    getWagerPeriods(),
-    getTeam(),
-  ]);
-
-  const repPeriods = await getRepPeriods();
-
-  const periodPlayers = await getPeriodPlayers(
-    periodKey.type,
-    periodKey.start,
-    periodSearch,
-    periodPage
-  );
+  /* All seven in one pass. These were three sequential awaits, which on a
+     page already doing a dozen queries meant three full round trips stacked
+     end to end for no reason - none of them needs another's answer. */
+  const [overview, report, churn, periods, team, repPeriods, periodPlayers] =
+    await Promise.all([
+      getWagerOverview(me.timezone, "", 1),
+      getWagerReport(reportPeriod.period, reportOwner || undefined, 500),
+      getChurn(me.timezone),
+      getWagerPeriods(),
+      getTeam(),
+      getRepPeriods(),
+      getPeriodPlayers(periodKey.type, periodKey.start, periodSearch, periodPage),
+    ]);
 
   /* Every dollar figure on this page comes from wager_periods. The ledger
      (wager_external) is still read for counts and the retire action, but not

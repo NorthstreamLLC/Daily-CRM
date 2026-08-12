@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { startOfDayUtc, endOfDayUtc, startOfDayPlusUtc } from "@/lib/time";
 
@@ -39,7 +40,18 @@ const PLAYER_FIELDS =
   "deposit_status, notes, assigned_at, last_contact_at, followup_attempts, " +
   "next_followup_at, next_action, missing_roobet, is_dead, weighted_wager";
 
-export async function getMe(): Promise<Me | null> {
+/**
+ * Who is asking.
+ *
+ * Wrapped in React's cache() because this is called from the layout, the page
+ * and often a component inside it - and each call was two round trips to
+ * Supabase (validate the token, then read the row). Six network hops before
+ * any actual data was fetched, on every single navigation.
+ *
+ * cache() dedupes within one render pass only, so there is no staleness across
+ * requests: a fresh request still re-validates the session.
+ */
+export const getMe = cache(async function getMe(): Promise<Me | null> {
   const supabase = createClient();
   const {
     data: { user },
@@ -53,9 +65,12 @@ export async function getMe(): Promise<Me | null> {
     .single();
 
   return (data as Me) ?? null;
-}
+});
 
-export async function getSetting(key: string, fallback: string): Promise<string> {
+export const getSetting = cache(async function getSetting(
+  key: string,
+  fallback: string
+): Promise<string> {
   const supabase = createClient();
   const { data } = await supabase
     .from("settings")
@@ -63,7 +78,7 @@ export async function getSetting(key: string, fallback: string): Promise<string>
     .eq("key", key)
     .maybeSingle();
   return data?.value ?? fallback;
-}
+});
 
 /**
  * TODAY'S QUEUE.

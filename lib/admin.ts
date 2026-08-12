@@ -51,13 +51,17 @@ export async function getTeam(): Promise<TeamMember[]> {
         "user_id, outreach_per_day, active_leads_per_day, vip_transfers_per_day, ftd_per_day, effective_from"
       )
       .order("effective_from", { ascending: false }),
-    supabase.from("players").select("owner_id").limit(100000),
+    /* Counting in Postgres rather than pulling every player row across the
+       wire to count them here. Same numbers, one row per rep instead of one
+       row per player. */
+    supabase
+      .rpc("player_counts_by_owner")
+      .then((r) => ({ data: (r.data ?? []) as { owner_id: string; players: number }[] })),
   ]);
 
-  const bookSize = new Map<string, number>();
-  for (const p of players ?? []) {
-    bookSize.set(p.owner_id, (bookSize.get(p.owner_id) ?? 0) + 1);
-  }
+  const bookSize = new Map<string, number>(
+    (players ?? []).map((row) => [row.owner_id, Number(row.players)])
+  );
 
   // Targets are dated; the newest row for each person is the one in force.
   // Ordered newest-first above, so the first row seen per person wins.
@@ -133,13 +137,14 @@ export async function getFunnelStages(): Promise<FunnelStage[]> {
       .from("statuses")
       .select("name, sort_order, followup_days, next_action, counts_as_lead, is_ftd, is_dead")
       .order("sort_order"),
-    supabase.from("players").select("status").limit(100000),
+    supabase
+      .rpc("player_counts_by_status")
+      .then((r) => ({ data: (r.data ?? []) as { status: string; players: number }[] })),
   ]);
 
-  const counts = new Map<string, number>();
-  for (const p of players ?? []) {
-    counts.set(p.status, (counts.get(p.status) ?? 0) + 1);
-  }
+  const counts = new Map<string, number>(
+    (players ?? []).map((row) => [row.status, Number(row.players)])
+  );
 
   return (stages ?? []).map((s) => ({
     ...s,
@@ -154,13 +159,14 @@ export async function getSourcesAdmin(): Promise<LookupRow[]> {
   const supabase = createClient();
   const [{ data: rows }, { data: players }] = await Promise.all([
     supabase.from("sources").select("name, sort_order, active").order("sort_order"),
-    supabase.from("players").select("source").limit(100000),
+    supabase
+      .rpc("player_counts_by_source")
+      .then((r) => ({ data: (r.data ?? []) as { source: string; players: number }[] })),
   ]);
 
-  const counts = new Map<string, number>();
-  for (const p of players ?? []) {
-    if (p.source) counts.set(p.source, (counts.get(p.source) ?? 0) + 1);
-  }
+  const counts = new Map<string, number>(
+    (players ?? []).map((row) => [row.source, Number(row.players)])
+  );
 
   return (rows ?? []).map((r) => ({ ...r, inUse: counts.get(r.name) ?? 0 }));
 }
