@@ -38,6 +38,12 @@ Thumbs.db
 exports/
 imports/
 
+# database backups - every player, every message, every figure, in plain text.
+# Migrations under supabase/migrations are still tracked; these are not.
+*backup*.sql
+*dump*.sql
+backups/
+
 # vercel
 .vercel
 
