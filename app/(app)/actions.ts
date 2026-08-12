@@ -7,11 +7,19 @@ import { startOfDayUtc } from "@/lib/time";
 
 export type ActionState = { error?: string; message?: string; warning?: string } | null;
 
-/** Both list pages read the same rows, so both need refreshing after a write. */
+/**
+ * Every page that reads a player needs refreshing after a write.
+ *
+ * Missing one is how a status change shows on Today but not on the Calendar,
+ * and the two then disagree about the same player - the exact class of bug the
+ * spreadsheet was full of.
+ */
 function refresh() {
   revalidatePath("/today");
   revalidatePath("/book");
   revalidatePath("/stats");
+  revalidatePath("/calendar");
+  revalidatePath("/admin", "layout");
 }
 
 /* ------------------------------------------------------------ Complete task */
@@ -241,6 +249,46 @@ export async function updatePlayerField(
     });
   }
 
+  /* SAVING A USERNAME CHECKS THE LEDGER IMMEDIATELY.
+     Waiting for the next sync meant a player with real wager sat showing $0
+     and looked broken. This attaches whatever history already exists and says
+     what it found, so a typo is obvious within a second rather than an hour. */
+  if (field === "roobet_username" && trimmed) {
+    const { data, error: attachError } = await supabase.rpc("attach_wager_history", {
+      p_player: playerId,
+    });
+
+    const result = Array.isArray(data) ? data[0] : data;
+
+    refresh();
+
+    if (attachError) {
+      return {
+        message: "Saved.",
+        warning:
+          "Couldn't check wager for that username - run migration " +
+          "20260812000013_attach_wager.sql, then re-save.",
+      };
+    }
+
+    if (result?.matched) {
+      const total = Number(result.total ?? 0);
+      return {
+        message:
+          `Saved. Matched on your codes — $${total.toLocaleString(undefined, {
+            maximumFractionDigits: 0,
+          })} wagered, history attached.`,
+      };
+    }
+
+    return {
+      message: "Saved.",
+      warning:
+        `No wager found for "${trimmed}" on any of your codes yet. Either they ` +
+        `haven't played, or the spelling doesn't match Roobet exactly.`,
+    };
+  }
+
   refresh();
   return { message: "Saved." };
 }
@@ -323,6 +371,143 @@ export async function bulkChangeStatus(
   return { message: `${changing.length} moved to ${newStatus}.` };
 }
 
+/* --------------------------------------------------- Corrections & wager */
+
+/**
+ * REVERSE A MISTAKEN DEPOSIT.
+ *
+ * The first-deposit stamp is permanent on purpose - a real depositor who later
+ * goes dead still deposited. But a status set by mistake needs undoing, and
+ * activity_log is append-only, so the correction is a new event rather than a
+ * deletion. Reported numbers subtract reversals; the history keeps both the
+ * original claim and the correction.
+ */
+export async function reverseFirstDeposit(playerId: string): Promise<ActionState> {
+  const supabase = createClient();
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const { data: player } = await supabase
+    .from("players")
+    .select("id, handle, first_deposit_at, status")
+    .eq("id", playerId)
+    .single();
+
+  if (!player) return { error: "Player not found." };
+  if (!player.first_deposit_at) return { message: "They aren't marked as deposited." };
+
+  const { error } = await supabase
+    .from("players")
+    .update({ first_deposit_at: null })
+    .eq("id", playerId);
+
+  if (error) return { error: error.message };
+
+  const { error: logError } = await supabase.from("activity_log").insert({
+    player_id: playerId,
+    user_id: me.id,
+    event_type: "deposit_reversed",
+    from_status: player.status,
+    metadata: { was: player.first_deposit_at },
+  });
+
+  if (logError) {
+    return {
+      error:
+        "Cleared the date, but couldn't record the correction - run migration " +
+        "20260812000014_corrections.sql so the deposit count updates too.",
+    };
+  }
+
+  refresh();
+  return { message: `${player.handle} is no longer counted as a deposit.` };
+}
+
+/**
+ * Re-check a player against the wager ledger.
+ *
+ * Useful after a backfill: the ledger gains months of history, and this pulls
+ * the new readings onto the player so their windowed figures fill in.
+ */
+export async function refreshPlayerWager(playerId: string): Promise<ActionState> {
+  const supabase = createClient();
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const { data, error } = await supabase.rpc("attach_wager_history", {
+    p_player: playerId,
+  });
+
+  if (error) return { error: error.message };
+
+  const result = Array.isArray(data) ? data[0] : data;
+  refresh();
+
+  if (!result?.matched) {
+    return {
+      warning:
+        "No wager found for that Roobet username on any code. Check the spelling against Roobet.",
+    };
+  }
+
+  const total = Number(result.total ?? 0);
+  const added = Number(result.rows_added ?? 0);
+
+  return {
+    message:
+      `$${total.toLocaleString(undefined, { maximumFractionDigits: 0 })} wagered` +
+      (added > 0 ? ` — ${added} new reading${added === 1 ? "" : "s"} attached.` : " — already up to date."),
+  };
+}
+
+/* ------------------------------------------------------------- Bulk assign */
+
+/**
+ * Move selected players to another rep - admin only.
+ *
+ * References stay as they are: MH-0088 keeps its number under a new owner, so
+ * anything written down elsewhere still finds the right person. The receiving
+ * rep picks them up in their queue on the players' normal cadence.
+ */
+export async function bulkAssignOwner(
+  playerIds: string[],
+  toUserId: string
+): Promise<ActionState> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+  if (me.role !== "admin") return { error: "Only admins can reassign players." };
+  if (playerIds.length === 0) return { error: "Nothing selected." };
+  if (playerIds.length > 500) return { error: "Select 500 or fewer at a time." };
+
+  const supabase = createClient();
+
+  const { data: target } = await supabase
+    .from("users")
+    .select("id, name, active")
+    .eq("id", toUserId)
+    .maybeSingle();
+
+  if (!target) return { error: "That person no longer exists." };
+  if (!target.active) return { error: `${target.name} is deactivated - reactivate them first.` };
+
+  const { error, count } = await supabase
+    .from("players")
+    .update({ owner_id: toUserId }, { count: "exact" })
+    .in("id", playerIds);
+
+  if (error) return { error: error.message };
+
+  await supabase.from("admin_audit").insert({
+    actor_id: me.id,
+    action: "bulk_assign_players",
+    target_user: toUserId,
+    detail: { count: count ?? playerIds.length },
+  });
+
+  refresh();
+  return { message: `${count ?? playerIds.length} players moved to ${target.name}.` };
+}
+
 /* -------------------------------------------------------------- Add a player */
 
 type HandleMatch = { reference: string; owner_name: string; status: string; is_mine: boolean };
@@ -375,9 +560,11 @@ export async function checkHandle(handle: string): Promise<HandleMatch[]> {
  * takes and increments a per-person counter under a row lock, so two players
  * created at the same instant cannot collide on a number.
  *
- * last_contact_at is deliberately left null. Adding someone to your book is not
- * the same as having spoken to them, so they land straight in today's queue and
- * only leave once you tick them off.
+ * Adding someone counts as the first contact, so last_contact_at is stamped
+ * now. You found them and reached out - being asked to then tick "I contacted
+ * them" on the same person the same day is the app not believing you. They
+ * appear under Added today for the rest of the day, and become a real task
+ * tomorrow on their stage's normal cadence.
  */
 export async function addPlayer(
   _prev: ActionState,
@@ -392,8 +579,20 @@ export async function addPlayer(
   const roobet = String(formData.get("roobet_username") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
   const force = String(formData.get("force") ?? "") === "1";
+  const contacted = String(formData.get("contacted") ?? "") === "1";
+  const requestedStatus = String(formData.get("status") ?? "").trim();
 
   if (!handle) return { error: "Enter a player handle." };
+
+  // The status has to be a real stage - it is a foreign key, and an invalid
+  // one would fail with a database error rather than something readable.
+  const { data: stage } = await supabase
+    .from("statuses")
+    .select("name")
+    .eq("name", requestedStatus || "Initial Contact")
+    .maybeSingle();
+
+  const status = stage?.name ?? "Initial Contact";
 
   const matches = await checkHandle(handle);
   const mine = matches.find((m) => m.is_mine);
@@ -410,6 +609,8 @@ export async function addPlayer(
     };
   }
 
+  const now = new Date().toISOString();
+
   const { data: created, error } = await supabase
     .from("players")
     .insert({
@@ -418,8 +619,14 @@ export async function addPlayer(
       source: source || null,
       roobet_username: roobet || null,
       notes: notes || null,
-      status: "Initial Contact",
-      assigned_at: new Date().toISOString(),
+      status,
+      assigned_at: now,
+      // Stamped only if you actually spoke to them. Left empty, they are a real
+      // task and appear in the queue tomorrow morning with a tick.
+      last_contact_at: contacted ? now : null,
+      vip_fasttrack_started_at: status === "VIP Transferred" ? now : null,
+      first_deposit_at:
+        status === "First Deposit" || status === "Active" ? now : null,
     })
     .select("id, reference")
     .single();
@@ -430,9 +637,14 @@ export async function addPlayer(
     player_id: created.id,
     user_id: me.id,
     event_type: "player_created",
-    to_status: "Initial Contact",
+    to_status: status,
   });
 
   refresh();
-  return { message: `Added ${created.reference} — ${handle}.` };
+
+  const note = contacted
+    ? "Contact logged — they're due again on their normal cadence."
+    : "Not contacted yet, so they're in today's queue.";
+
+  return { message: `Added ${created.reference} — ${handle}. ${note}` };
 }

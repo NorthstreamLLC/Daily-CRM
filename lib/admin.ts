@@ -276,6 +276,869 @@ export async function getImportHistory(): Promise<ImportBatch[]> {
   })) as ImportBatch[];
 }
 
+/* ------------------------------------------------------------ Wager stats */
+
+export type WagerByRep = {
+  userId: string;
+  name: string;
+  code: string;
+  matchedPlayers: number;
+  today: number;
+  week: number;
+  month: number;
+  allTime: number;
+};
+
+export type TopWagerPlayer = {
+  id: string;
+  handle: string;
+  reference: string;
+  roobet_username: string | null;
+  ownerName: string;
+  allTime: number;
+  month: number;
+};
+
+export type SignalPlayer = {
+  id: string;
+  handle: string;
+  reference: string;
+  ownerId: string;
+  ownerName: string;
+  status: string;
+  wager: number;
+};
+
+export type DepositSignals = {
+  /** Distinct usernames that have ever wagered on your codes. */
+  allTimeWagerers: number;
+  /**
+   * Genuinely new: first wager on or after the baseline date. Null when no
+   * baseline is set, because without one these numbers only describe when our
+   * sync first noticed someone.
+   */
+  newSinceBaseline: number | null;
+  newMonth: number | null;
+  newWeek: number | null;
+  baseline: string;
+  /** Wagering on your codes but never marked deposited - likely missed FTDs. */
+  missed: { count: number; sample: SignalPlayer[] };
+  /** Marked deposited by a rep but zero wager on your codes. */
+  unverified: { count: number; sample: SignalPlayer[] };
+};
+
+export type CodeTotals = {
+  source: string;
+  today: number;
+  week: number;
+  month: number;
+  allTime: number;
+  wagerers: number;
+};
+
+export type UnclaimedWagerer = {
+  username: string;
+  sources: string;
+  month: number;
+  allTime: number;
+};
+
+export type WagerOverview = {
+  /** Company-wide, from the ledger - includes the general book. */
+  totals: { today: number; week: number; month: number; allTime: number };
+  byCode: CodeTotals[];
+  unclaimed: {
+    /** Everyone unclaimed. */
+    count: number;
+    /** How many match the current search. */
+    matching: number;
+    total: number;
+    page: number;
+    pageCount: number;
+    sample: UnclaimedWagerer[];
+  };
+  byRep: WagerByRep[];
+  topPlayers: TopWagerPlayer[];
+  snapshotCount: number;
+  signals: DepositSignals;
+};
+
+/**
+ * COMPANY WAGER, cut by window and by rep.
+ *
+ * All-time comes straight off each player's current figure. The windows come
+ * from wager_deltas() in the database - the leaderboard reports running
+ * totals, so a window is the movement between snapshots, and a player's first
+ * ever snapshot is a baseline rather than activity.
+ */
+export const UNCLAIMED_PAGE_SIZE = 50;
+export const UNCLAIMED_MAX_PAGES = 10;
+
+export async function getWagerOverview(
+  timezone: string,
+  /** Filters the unclaimed wagerer list. */
+  search = "",
+  /** 1-based page of the unclaimed list. */
+  page = 1
+): Promise<WagerOverview> {
+  const supabase = createClient();
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  const { startOfDayUtc, startOfDayPlusUtc, ymdInZone, dayStartFromYmd } = await import(
+    "@/lib/time"
+  );
+
+  const todayStart = startOfDayUtc(timezone, now).toISOString();
+  const weekStart = startOfDayPlusUtc(timezone, -6, now).toISOString();
+  const monthYmd = `${ymdInZone(now, timezone).slice(0, 7)}-01`;
+  const monthStart = (dayStartFromYmd(monthYmd, timezone) ?? now).toISOString();
+
+  type Delta = { player_id: string; owner_id: string; delta: number };
+
+  type ExternalDelta = { username: string; source: string; delta: number };
+
+  const externalRpc = (start: string) =>
+    supabase
+      .rpc("wager_external_deltas", { p_start: start, p_end: nowIso })
+      .then((r) => (r.data ?? []) as ExternalDelta[]);
+
+  const [
+    { data: users },
+    { data: players },
+    { count: snapshotCount },
+    { data: firstWagers },
+    { data: ledgerRows },
+    extDay,
+    extWeek,
+    extMonth,
+    dayDeltas,
+    weekDeltas,
+    monthDeltas,
+  ] = await Promise.all([
+    supabase.from("users").select("id, name, code").eq("active", true).order("name"),
+    supabase
+      .from("players")
+      .select(
+        "id, handle, reference, roobet_username, owner_id, weighted_wager, status, first_deposit_at"
+      )
+      .limit(100000),
+    supabase.from("wager_snapshots").select("id", { count: "exact", head: true }),
+    // Ordered oldest-first so the first row seen per username is their first
+    // nonzero wager - the moment a deposit provably happened. Read from the
+    // ledger so the general book counts too.
+    supabase
+      .from("wager_external")
+      .select("username, captured_at")
+      .gt("wagered", 0)
+      .order("captured_at", { ascending: true })
+      .limit(300000),
+    // The full ledger, for latest-per-pair totals and the unclaimed list.
+    supabase
+      .from("wager_external")
+      .select("username, source, wagered, captured_at")
+      .order("captured_at", { ascending: true })
+      .limit(300000),
+    externalRpc(todayStart),
+    externalRpc(weekStart),
+    externalRpc(monthStart),
+    supabase
+      .rpc("wager_deltas", { p_start: todayStart, p_end: nowIso })
+      .then((r) => (r.data ?? []) as Delta[]),
+    supabase
+      .rpc("wager_deltas", { p_start: weekStart, p_end: nowIso })
+      .then((r) => (r.data ?? []) as Delta[]),
+    supabase
+      .rpc("wager_deltas", { p_start: monthStart, p_end: nowIso })
+      .then((r) => (r.data ?? []) as Delta[]),
+  ]);
+
+  const sum = (rows: Delta[]) => rows.reduce((a, r) => a + Number(r.delta), 0);
+  const byOwner = (rows: Delta[]) => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.owner_id, (m.get(r.owner_id) ?? 0) + Number(r.delta));
+    return m;
+  };
+  const byPlayer = (rows: Delta[]) => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.player_id, Number(r.delta));
+    return m;
+  };
+
+  const dayByOwner = byOwner(dayDeltas);
+  const weekByOwner = byOwner(weekDeltas);
+  const monthByOwner = byOwner(monthDeltas);
+  const monthByPlayer = byPlayer(monthDeltas);
+
+  const allTimeByOwner = new Map<string, number>();
+  const matchedByOwner = new Map<string, number>();
+  let allTimeTotal = 0;
+
+  for (const p of players ?? []) {
+    const w = Number(p.weighted_wager ?? 0);
+    if (w > 0) {
+      allTimeTotal += w;
+      allTimeByOwner.set(p.owner_id, (allTimeByOwner.get(p.owner_id) ?? 0) + w);
+    }
+    if (p.roobet_username?.trim() && w > 0) {
+      matchedByOwner.set(p.owner_id, (matchedByOwner.get(p.owner_id) ?? 0) + 1);
+    }
+  }
+
+  const byRep: WagerByRep[] = (users ?? [])
+    .map((u) => ({
+      userId: u.id,
+      name: u.name,
+      code: u.code,
+      matchedPlayers: matchedByOwner.get(u.id) ?? 0,
+      today: dayByOwner.get(u.id) ?? 0,
+      week: weekByOwner.get(u.id) ?? 0,
+      month: monthByOwner.get(u.id) ?? 0,
+      allTime: allTimeByOwner.get(u.id) ?? 0,
+    }))
+    .sort((a, b) => b.allTime - a.allTime);
+
+  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
+
+  const topPlayers: TopWagerPlayer[] = (players ?? [])
+    .filter((p) => Number(p.weighted_wager ?? 0) > 0)
+    .sort((a, b) => Number(b.weighted_wager) - Number(a.weighted_wager))
+    .slice(0, 15)
+    .map((p) => ({
+      id: p.id,
+      handle: p.handle,
+      reference: p.reference,
+      roobet_username: p.roobet_username,
+      ownerName: names.get(p.owner_id) ?? "—",
+      allTime: Number(p.weighted_wager),
+      month: monthByPlayer.get(p.id) ?? 0,
+    }));
+
+  /* THE LEDGER - company-wide truth, general book included.
+     Latest reading per (username, source) is that pair's all-time total;
+     window figures come from the external deltas RPC. */
+  const claimed = new Set(
+    (players ?? [])
+      .filter((p) => p.roobet_username?.trim())
+      .map((p) => p.roobet_username!.trim().toLowerCase())
+  );
+
+  /* Retired usernames were already wagering before the CRM existed. They stay
+     in every company total but leave the working list, so the handful of
+     genuinely new names are visible instead of buried under hundreds. */
+  const { data: ignoredRows } = await supabase.from("wager_ignored").select("username");
+  const ignored = new Set(
+    (ignoredRows ?? []).map((r) => String(r.username).trim().toLowerCase())
+  );
+
+  type PairInfo = { display: string; source: string; latest: number };
+  const latestByPair = new Map<string, PairInfo>();
+  for (const row of ledgerRows ?? []) {
+    // Rows arrive oldest-first, so the last write per pair is the latest.
+    const key = `${String(row.username).toLowerCase()}|${row.source}`;
+    latestByPair.set(key, {
+      display: String(row.username),
+      source: row.source,
+      latest: Number(row.wagered),
+    });
+  }
+
+  const codeAgg = new Map<string, CodeTotals>();
+  const codeOf = (source: string) => {
+    let c = codeAgg.get(source);
+    if (!c) {
+      c = { source, today: 0, week: 0, month: 0, allTime: 0, wagerers: 0 };
+      codeAgg.set(source, c);
+    }
+    return c;
+  };
+
+  /* Per code, every pair counts - that is what each code produced.
+     Company-wide, the same player on two codes is the same wagering reported
+     twice, so take their largest reading rather than adding them. */
+  const bestByUsername = new Map<string, number>();
+
+  latestByPair.forEach((info, key) => {
+    const uname = key.slice(0, key.lastIndexOf("|"));
+    bestByUsername.set(uname, Math.max(bestByUsername.get(uname) ?? 0, info.latest));
+
+    const c = codeOf(info.source);
+    c.allTime += info.latest;
+    c.wagerers += 1;
+  });
+
+  let companyAllTime = 0;
+  bestByUsername.forEach((v) => {
+    companyAllTime += v;
+  });
+
+  const sumExt = (rows: ExternalDelta[]) => rows.reduce((a, r) => a + Number(r.delta), 0);
+  for (const r of extDay) codeOf(r.source).today += Number(r.delta);
+  for (const r of extWeek) codeOf(r.source).week += Number(r.delta);
+  for (const r of extMonth) codeOf(r.source).month += Number(r.delta);
+
+  const byCode = Array.from(codeAgg.values()).sort((a, b) => b.allTime - a.allTime);
+
+  // Unclaimed: wagering on your codes, in nobody's book.
+  const monthByUsername = new Map<string, number>();
+  for (const r of extMonth) {
+    monthByUsername.set(
+      r.username,
+      (monthByUsername.get(r.username) ?? 0) + Number(r.delta)
+    );
+  }
+
+  const unclaimedAgg = new Map<string, UnclaimedWagerer & { srcSet: Set<string> }>();
+  latestByPair.forEach((info, key) => {
+    const uname = key.slice(0, key.lastIndexOf("|"));
+    if (claimed.has(uname) || ignored.has(uname)) return;
+    let u = unclaimedAgg.get(uname);
+    if (!u) {
+      u = {
+        username: info.display,
+        sources: "",
+        month: monthByUsername.get(uname) ?? 0,
+        allTime: 0,
+        srcSet: new Set(),
+      };
+      unclaimedAgg.set(uname, u);
+    }
+    u.allTime = Math.max(u.allTime, info.latest);
+    u.srcSet.add(info.source);
+  });
+
+  const allUnclaimed = Array.from(unclaimedAgg.values())
+    .map((u) => ({ ...u, sources: Array.from(u.srcSet).join(", ") }))
+    .sort((a, b) => b.allTime - a.allTime);
+
+  // The total is of everyone unclaimed, not just the filtered view - a search
+  // narrows what you read, it does not change what you are owed.
+  const unclaimedTotal = allUnclaimed.reduce((a, u) => a + u.allTime, 0);
+
+  const needle = search.trim().toLowerCase();
+  const unclaimedList = needle
+    ? allUnclaimed.filter((u) => u.username.toLowerCase().includes(needle))
+    : allUnclaimed;
+
+  // Capped at ten pages: past 500 rows, searching beats paging.
+  const unclaimedPageCount = Math.min(
+    UNCLAIMED_MAX_PAGES,
+    Math.max(1, Math.ceil(unclaimedList.length / UNCLAIMED_PAGE_SIZE))
+  );
+  const safePage = Math.min(Math.max(1, page), unclaimedPageCount);
+
+  /* Deposit signals - wager as proof of deposit.
+     Roobet does not expose deposits, but nobody wagers without one, so a
+     username's first nonzero ledger entry is a dated deposit confirmation. */
+  const firstWagerAt = new Map<string, string>();
+  for (const f of firstWagers ?? []) {
+    const key = String(f.username).toLowerCase();
+    if (!firstWagerAt.has(key)) firstWagerAt.set(key, f.captured_at);
+  }
+
+  // Compared as instants, not strings - Postgres timestamps arrive in a
+  // different ISO flavour than JavaScript produces.
+  const weekMs = new Date(weekStart).getTime();
+  const monthMs = new Date(monthStart).getTime();
+
+  /* THE BASELINE.
+     Without it, "new players" really means "players our sync noticed for the
+     first time" - which, the day after importing history, is everybody. Anyone
+     whose first wager predates the baseline was already playing before we
+     started watching and is never counted as new. */
+  const { data: baselineRow } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", "wager_new_player_baseline")
+    .maybeSingle();
+
+  const baseline = String(baselineRow?.value ?? "").trim();
+  const baselineMs = /^\d{4}-\d{2}-\d{2}$/.test(baseline)
+    ? new Date(`${baseline}T00:00:00Z`).getTime()
+    : null;
+
+  const allTimeWagerers = firstWagerAt.size;
+
+  let newSinceBaseline: number | null = null;
+  let newWeek: number | null = null;
+  let newMonth: number | null = null;
+
+  if (baselineMs !== null) {
+    newSinceBaseline = 0;
+    newWeek = 0;
+    newMonth = 0;
+    firstWagerAt.forEach((at) => {
+      const t = new Date(at).getTime();
+      if (t < baselineMs) return;
+      newSinceBaseline! += 1;
+      if (t >= weekMs) newWeek! += 1;
+      if (t >= monthMs) newMonth! += 1;
+    });
+  }
+
+  const toSignal = (p: {
+    id: string;
+    handle: string;
+    reference: string;
+    owner_id: string;
+    status: string;
+    weighted_wager: number | null;
+  }): SignalPlayer => ({
+    id: p.id,
+    handle: p.handle,
+    reference: p.reference,
+    ownerId: p.owner_id,
+    ownerName: names.get(p.owner_id) ?? "—",
+    status: p.status,
+    wager: Number(p.weighted_wager ?? 0),
+  });
+
+  const missedRows = (players ?? [])
+    .filter((p) => Number(p.weighted_wager ?? 0) > 0 && !p.first_deposit_at)
+    .sort((a, b) => Number(b.weighted_wager) - Number(a.weighted_wager));
+
+  const unverifiedRows = (players ?? []).filter(
+    (p) => p.first_deposit_at && Number(p.weighted_wager ?? 0) === 0
+  );
+
+  // Player-based sums are still computed for byRep; the company totals come
+  // from the ledger so the general book counts.
+  void sum;
+  void allTimeTotal;
+
+  return {
+    totals: {
+      today: sumExt(extDay),
+      week: sumExt(extWeek),
+      month: sumExt(extMonth),
+      allTime: companyAllTime,
+    },
+    byCode,
+    unclaimed: {
+      count: allUnclaimed.length,
+      matching: unclaimedList.length,
+      total: unclaimedTotal,
+      page: safePage,
+      pageCount: unclaimedPageCount,
+      sample: unclaimedList.slice(
+        (safePage - 1) * UNCLAIMED_PAGE_SIZE,
+        safePage * UNCLAIMED_PAGE_SIZE
+      ),
+    },
+    byRep,
+    topPlayers,
+    snapshotCount: snapshotCount ?? 0,
+    signals: {
+      allTimeWagerers,
+      newSinceBaseline,
+      newWeek,
+      newMonth,
+      baseline,
+      missed: { count: missedRows.length, sample: missedRows.slice(0, 10).map(toSignal) },
+      unverified: {
+        count: unverifiedRows.length,
+        sample: unverifiedRows.slice(0, 10).map(toSignal),
+      },
+    },
+  };
+}
+
+/* ---------------------------------------------------------- Wager periods */
+
+export type PeriodTotals = {
+  total: number;
+  claimed: number;
+  unclaimed: number;
+  wagerers: number;
+  byCode: { source: string; total: number; wagerers: number }[];
+};
+
+export type MonthRow = { month: string; label: string; total: number; wagerers: number };
+
+export type WagerPeriods = {
+  all: PeriodTotals;
+  month: PeriodTotals;
+  week: PeriodTotals;
+  day: PeriodTotals;
+  months: MonthRow[];
+  /** Which UTC month, week and day these figures cover. */
+  labels: { month: string; week: string; day: string };
+  ready: boolean;
+  lastSyncedAt: string | null;
+};
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function utcMonthStart(d: Date) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+}
+function utcWeekStart(d: Date) {
+  const day = (d.getUTCDay() + 6) % 7;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+}
+function utcDayStart(d: Date) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * EXACT WAGER PER PERIOD.
+ *
+ * Read straight from what Roobet was asked for, rather than derived from the
+ * difference between two snapshots. Every figure here is a fact the API
+ * returned for that exact UTC window, which is why "this month" is right on
+ * the first sync instead of the second.
+ *
+ * UTC throughout, because Roobet reports in UTC - so a month here is the same
+ * month the affiliate panel shows and commission is paid on.
+ */
+export async function getWagerPeriods(): Promise<WagerPeriods> {
+  const supabase = createClient();
+  const now = new Date();
+
+  const monthKey = isoDay(utcMonthStart(now));
+  const weekKey = isoDay(utcWeekStart(now));
+  const dayKey = isoDay(utcDayStart(now));
+
+  type Row = {
+    source: string;
+    wagerers: number;
+    total: number;
+    claimed_total: number;
+    unclaimed_total: number;
+  };
+
+  const totalsFor = (type: string, start: string) =>
+    supabase
+      .rpc("wager_period_totals", { p_type: type, p_start: start })
+      .then((r) => (r.data ?? []) as Row[]);
+
+  const [allRows, monthRows, weekRows, dayRows, historyRes] = await Promise.all([
+    totalsFor("all", "1970-01-01"),
+    totalsFor("month", monthKey),
+    totalsFor("week", weekKey),
+    totalsFor("day", dayKey),
+    supabase
+      .rpc("wager_month_history")
+      .then((r) => (r.data ?? []) as { period_start: string; total: number; wagerers: number }[]),
+  ]);
+
+  const fold = (rows: Row[]): PeriodTotals => ({
+    total: rows.reduce((a, r) => a + Number(r.total), 0),
+    claimed: rows.reduce((a, r) => a + Number(r.claimed_total), 0),
+    unclaimed: rows.reduce((a, r) => a + Number(r.unclaimed_total), 0),
+    wagerers: rows.reduce((a, r) => a + Number(r.wagerers), 0),
+    byCode: rows.map((r) => ({
+      source: r.source,
+      total: Number(r.total),
+      wagerers: Number(r.wagerers),
+    })),
+  });
+
+  const months: MonthRow[] = (historyRes ?? []).map((m) => {
+    const ym = String(m.period_start).slice(0, 7);
+    return {
+      month: ym,
+      label: `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`,
+      total: Number(m.total),
+      wagerers: Number(m.wagerers),
+    };
+  });
+
+  const prettyUtc = (d: Date, opts: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: "UTC" }).format(d);
+
+  return {
+    all: fold(allRows),
+    month: fold(monthRows),
+    week: fold(weekRows),
+    day: fold(dayRows),
+    months,
+    labels: {
+      month: prettyUtc(utcMonthStart(now), { month: "long", year: "numeric" }),
+      week: `week of ${prettyUtc(utcWeekStart(now), { day: "numeric", month: "short" })}`,
+      day: prettyUtc(now, { day: "numeric", month: "short" }),
+    },
+    ready: allRows.length > 0 || monthRows.length > 0,
+    lastSyncedAt: await newestSyncTime(),
+  };
+}
+
+export type RepPeriod = {
+  userId: string;
+  name: string;
+  players: number;
+  wagered: number;
+};
+
+/**
+ * Contribution by rep for one period, from the same stored facts as the
+ * totals. Only players actually in a book count, which is what commission is
+ * paid on.
+ */
+export async function getRepPeriods(now = new Date()): Promise<{
+  reps: { userId: string; name: string; day: number; week: number; month: number; all: number; players: number }[];
+  allTotal: number;
+}> {
+  const supabase = createClient();
+
+  const call = (type: string, start: string) =>
+    supabase
+      .rpc("wager_period_by_rep", { p_type: type, p_start: start })
+      .then((r) => (r.data ?? []) as { owner_id: string; owner_name: string; players: number; wagered: number }[]);
+
+  const [all, month, week, day] = await Promise.all([
+    call("all", "1970-01-01"),
+    call("month", isoDay(utcMonthStart(now))),
+    call("week", isoDay(utcWeekStart(now))),
+    call("day", isoDay(utcDayStart(now))),
+  ]);
+
+  const pick = (rows: { owner_id: string; wagered: number }[], id: string) =>
+    Number(rows.find((r) => r.owner_id === id)?.wagered ?? 0);
+
+  const reps = all.map((r) => ({
+    userId: r.owner_id,
+    name: r.owner_name,
+    players: Number(r.players),
+    all: Number(r.wagered),
+    month: pick(month, r.owner_id),
+    week: pick(week, r.owner_id),
+    day: pick(day, r.owner_id),
+  }));
+
+  return {
+    reps,
+    allTotal: reps.reduce((a, r) => a + r.all, 0),
+  };
+}
+
+/** When any source last reported in - drives the freshness indicator. */
+async function newestSyncTime(): Promise<string | null> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("wager_sources")
+    .select("last_synced_at")
+    .eq("active", true)
+    .not("last_synced_at", "is", null)
+    .order("last_synced_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.last_synced_at ?? null;
+}
+
+export type PeriodPlayer = {
+  username: string;
+  wagered: number;
+  sources: string;
+  playerId: string | null;
+  ownerName: string | null;
+  status: string | null;
+};
+
+export type PeriodPlayers = {
+  rows: PeriodPlayer[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+};
+
+/** Resolve a period choice from the URL into the key wager_periods stores. */
+export function resolvePeriodKey(choice: string, now = new Date()) {
+  if (/^\d{4}-\d{2}$/.test(choice)) {
+    return { type: "month" as const, start: `${choice}-01` };
+  }
+  if (choice === "day") return { type: "day" as const, start: isoDay(utcDayStart(now)) };
+  if (choice === "week") return { type: "week" as const, start: isoDay(utcWeekStart(now)) };
+  if (choice === "all") return { type: "all" as const, start: "1970-01-01" };
+  return { type: "month" as const, start: isoDay(utcMonthStart(now)) };
+}
+
+/**
+ * Who wagered it. Same period vocabulary as the totals above, so the list and
+ * the headline figure can never be measuring different things.
+ */
+export async function getPeriodPlayers(
+  type: string,
+  start: string,
+  search = "",
+  page = 1,
+  pageSize = 50
+): Promise<PeriodPlayers> {
+  const supabase = createClient();
+  const safePage = Math.max(1, page);
+
+  const { data } = await supabase.rpc("wager_period_players", {
+    p_type: type,
+    p_start: start,
+    p_search: search.trim(),
+    p_limit: pageSize,
+    p_offset: (safePage - 1) * pageSize,
+  });
+
+  const rows = (data ?? []) as {
+    username: string;
+    wagered: number;
+    sources: string;
+    player_id: string | null;
+    owner_name: string | null;
+    status: string | null;
+    total_count: number;
+  }[];
+
+  const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+
+  return {
+    rows: rows.map((r) => ({
+      username: r.username,
+      wagered: Number(r.wagered),
+      sources: r.sources,
+      playerId: r.player_id,
+      ownerName: r.owner_name,
+      status: r.status,
+    })),
+    total,
+    page: safePage,
+    pageSize,
+    pages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+/* ------------------------------------------------------------ Wager report */
+
+export type WagerReportRow = {
+  playerId: string;
+  handle: string;
+  reference: string;
+  roobetUsername: string | null;
+  ownerName: string;
+  status: string;
+  windowWager: number;
+  allTime: number;
+};
+
+export type WagerReport = {
+  rows: WagerReportRow[];
+  total: number;
+  playerCount: number;
+  /** Wager in the window from usernames in nobody's book. */
+  unclaimedTotal: number;
+};
+
+/**
+ * PER-PLAYER WAGER FOR A DATE WINDOW.
+ *
+ * The report behind weekly and monthly reviews: who produced what, between two
+ * dates. Row Level Security scopes it automatically - a rep calling this sees
+ * their own players, an admin sees everyone - so the same function serves both
+ * the Stats page and the Admin wager tab.
+ */
+export async function getWagerReport(
+  start: Date | null,
+  end: Date | null,
+  ownerId?: string
+): Promise<WagerReport> {
+  const supabase = createClient();
+  const from = (start ?? new Date("2020-01-01")).toISOString();
+  const to = (end ?? new Date()).toISOString();
+
+  type Delta = { player_id: string; owner_id: string; delta: number };
+
+  const [{ data: deltas }, { data: players }, { data: users }, { data: extDeltas }] =
+    await Promise.all([
+      supabase
+        .rpc("wager_deltas", { p_start: from, p_end: to })
+        .then((r) => (r.data ?? []) as Delta[])
+        .then((data) => ({ data })),
+      supabase
+        .from("players")
+        .select("id, handle, reference, roobet_username, status, owner_id, weighted_wager")
+        .limit(100000),
+      supabase.from("users").select("id, name"),
+      supabase
+        .rpc("wager_external_deltas", { p_start: from, p_end: to })
+        .then((r) => (r.data ?? []) as { username: string; delta: number }[])
+        .then((data) => ({ data })),
+    ]);
+
+  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
+  const byId = new Map((players ?? []).map((p) => [p.id as string, p]));
+
+  const claimed = new Set(
+    (players ?? [])
+      .filter((p) => p.roobet_username?.trim())
+      .map((p) => p.roobet_username!.trim().toLowerCase())
+  );
+
+  const rows: WagerReportRow[] = (deltas ?? [])
+    .filter((d) => Number(d.delta) > 0)
+    .filter((d) => !ownerId || d.owner_id === ownerId)
+    .map((d) => {
+      const p = byId.get(d.player_id);
+      return {
+        playerId: d.player_id,
+        handle: p?.handle ?? "—",
+        reference: p?.reference ?? "",
+        roobetUsername: p?.roobet_username ?? null,
+        ownerName: names.get(d.owner_id) ?? "—",
+        status: p?.status ?? "—",
+        windowWager: Number(d.delta),
+        allTime: Number(p?.weighted_wager ?? 0),
+      };
+    })
+    .sort((a, b) => b.windowWager - a.windowWager);
+
+  const unclaimedTotal = (extDeltas ?? [])
+    .filter((d) => !claimed.has(String(d.username).toLowerCase()))
+    .reduce((a, d) => a + Number(d.delta), 0);
+
+  return {
+    rows,
+    total: rows.reduce((a, r) => a + r.windowWager, 0),
+    playerCount: rows.length,
+    unclaimedTotal,
+  };
+}
+
+/* ------------------------------------------------------------ Wager sources */
+
+export type WagerSource = {
+  id: string;
+  name: string;
+  url: string;
+  keyMasked: string;      // the real key never reaches a browser
+  auth_style: "bearer" | "header" | "query";
+  header_name: string;
+  active: boolean;
+  last_synced_at: string | null;
+  last_status: string | null;
+};
+
+/** Sources with their keys masked to the last four characters. */
+export async function getWagerSources(): Promise<WagerSource[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("wager_sources")
+    .select("id, name, url, api_key, auth_style, header_name, active, last_synced_at, last_status")
+    .order("name");
+
+  return (data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    url: s.url,
+    keyMasked: `····${String(s.api_key).slice(-4)}`,
+    auth_style: s.auth_style as WagerSource["auth_style"],
+    header_name: s.header_name,
+    active: s.active,
+    last_synced_at: s.last_synced_at,
+    last_status: s.last_status,
+  }));
+}
+
 /** The audit trail, for the admin overview. */
 export async function getRecentAudit(limit = 10) {
   const supabase = createClient();

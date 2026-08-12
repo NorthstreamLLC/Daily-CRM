@@ -4,8 +4,9 @@ import { Fragment, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Player } from "@/lib/queries";
 import type { BookSort } from "@/lib/book";
-import { Button, Select, cn } from "@/components/ui";
+import { Badge, Button, Select, cn } from "@/components/ui";
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -15,39 +16,39 @@ import {
   MessageSquare,
   X,
 } from "@/components/icons";
-import { bulkChangeStatus } from "../actions";
-import {
-  DueLabel,
-  PlayerDetail,
-  PlayerFlags,
-  StatusSelect,
-  formatDate,
-  type StatusOption,
-} from "../shared";
+import { bulkAssignOwner, bulkChangeStatus } from "../actions";
+import { DueLabel, PlayerDetail, StatusSelect, formatDate, type StatusOption } from "../shared";
 
-type Column = { key: BookSort | null; label: string; className?: string };
+type Column = {
+  key: BookSort | null;
+  label: string;
+  align?: "right";
+  className?: string;
+};
 
 const COLUMNS: Column[] = [
   { key: "handle", label: "Player" },
-  { key: null, label: "Roobet username" },
+  { key: null, label: "Roobet username", className: "w-[170px]" },
   { key: "status", label: "Status", className: "w-[172px]" },
-  { key: "source", label: "Source", className: "w-[110px]" },
-  { key: "last_contact_at", label: "Last contact", className: "w-[110px]" },
-  { key: "next_followup_at", label: "Due", className: "w-[110px]" },
-  { key: null, label: "Notes", className: "w-[64px]" },
+  { key: "weighted_wager", label: "Wagered", align: "right", className: "w-[104px]" },
+  { key: "last_contact_at", label: "Last contact", align: "right", className: "w-[112px]" },
+  { key: "next_followup_at", label: "Due", align: "right", className: "w-[112px]" },
 ];
+
+const money = (n: number) =>
+  "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 /**
  * THE BOOK.
  *
  * Every player, always editable - the queue decides what needs doing today,
- * this decides nothing and hides nothing. That distinction matters: the single
- * most common frustration with the spreadsheet was a row disappearing from view
- * and taking the ability to correct it along with it.
+ * this decides nothing and hides nothing. That distinction matters: the most
+ * common frustration with the spreadsheet was a row disappearing from view and
+ * taking the ability to correct it with it.
  *
  * Sorting and paging go through the URL and back to the database rather than
- * being done in the browser, so the behaviour does not change once the book
- * outgrows one page.
+ * happening in the browser, so behaviour does not change once the book outgrows
+ * one page.
  */
 export function BookTable({
   rows,
@@ -57,7 +58,10 @@ export function BookTable({
   overdueHours,
   page,
   pageCount,
+  pageSize,
   total,
+  readOnly = false,
+  team,
 }: {
   rows: Player[];
   statuses: StatusOption[];
@@ -66,7 +70,11 @@ export function BookTable({
   overdueHours: number;
   page: number;
   pageCount: number;
+  pageSize: number;
   total: number;
+  readOnly?: boolean;
+  /** Present only for admins - enables "Assign to" in the bulk bar. */
+  team?: { id: string; name: string; code: string }[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -76,6 +84,7 @@ export function BookTable({
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
+  const [assignTo, setAssignTo] = useState("");
   const [bulkPending, startBulk] = useTransition();
   const [bulkResult, setBulkResult] = useState<string | null>(null);
 
@@ -127,19 +136,31 @@ export function BookTable({
     });
   }
 
+  function applyAssign() {
+    if (!assignTo || selected.size === 0) return;
+    startBulk(async () => {
+      const res = await bulkAssignOwner(Array.from(selected), assignTo);
+      setBulkResult(res?.error ?? res?.message ?? null);
+      setSelected(new Set());
+      setAssignTo("");
+      router.refresh();
+    });
+  }
+
+  const firstOnPage = (page - 1) * pageSize + 1;
+  const lastOnPage = Math.min(page * pageSize, total);
+
   return (
     <div>
-      {/* Bulk action bar - only present when there is a selection */}
-      {selected.size > 0 && (
+      {/* Bulk actions - present only when there is a selection */}
+      {selected.size > 0 && !readOnly && (
         <div
           role="region"
           aria-label="Bulk actions"
-          className="mb-3 flex flex-wrap items-center gap-3 rounded-card border border-accent/30
+          className="mb-3 flex flex-wrap items-center gap-3 rounded-card border border-accent/25
                      bg-accent-soft px-3 py-2.5"
         >
-          <span className="text-small font-medium text-accent">
-            {selected.size} selected
-          </span>
+          <span className="text-small font-medium text-accent">{selected.size} selected</span>
           <Select
             value={bulkStatus}
             onChange={(e) => setBulkStatus(e.target.value)}
@@ -162,6 +183,37 @@ export function BookTable({
           >
             Apply
           </Button>
+
+          {/* Assign to another rep - admins only, and the receiving rep picks
+              them up in their own queue on the players' normal cadence. */}
+          {team && team.length > 0 && (
+            <>
+              <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
+              <Select
+                value={assignTo}
+                onChange={(e) => setAssignTo(e.target.value)}
+                aria-label="Assign selected players to"
+                className="h-8 w-auto min-w-[160px] text-small"
+              >
+                <option value="">Assign to…</option>
+                {team.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.code})
+                  </option>
+                ))}
+              </Select>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={!assignTo}
+                loading={bulkPending}
+                onClick={applyAssign}
+              >
+                Assign
+              </Button>
+            </>
+          )}
+
           <button
             type="button"
             onClick={() => setSelected(new Set())}
@@ -174,7 +226,10 @@ export function BookTable({
       )}
 
       {bulkResult && (
-        <p role="status" className="mb-3 rounded-control bg-success-soft px-3 py-2 text-small text-success">
+        <p
+          role="status"
+          className="mb-3 rounded-control bg-success-soft px-3 py-2 text-small text-success"
+        >
           {bulkResult}
         </p>
       )}
@@ -182,14 +237,16 @@ export function BookTable({
       {/* Desktop table */}
       <div className="hidden overflow-hidden rounded-card border border-line bg-surface shadow-card lg:block">
         <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-line bg-sunken">
-              <th scope="col" className="w-10 px-3 py-2.5">
-                <Checkbox
-                  checked={allOnPageSelected}
-                  onChange={toggleAll}
-                  label="Select all on this page"
-                />
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b-2 border-line-strong bg-sunken">
+              <th scope="col" className="w-11 px-3 py-2.5">
+                {!readOnly && (
+                  <Checkbox
+                    checked={allOnPageSelected}
+                    onChange={toggleAll}
+                    label="Select all on this page"
+                  />
+                )}
               </th>
               {COLUMNS.map((col) => (
                 <th
@@ -197,6 +254,7 @@ export function BookTable({
                   scope="col"
                   className={cn(
                     "px-3 py-2.5 text-label font-medium uppercase tracking-wide text-ink-subtle",
+                    col.align === "right" && "text-right",
                     col.className
                   )}
                   aria-sort={
@@ -211,7 +269,10 @@ export function BookTable({
                     <button
                       type="button"
                       onClick={() => toggleSort(col.key as BookSort)}
-                      className="inline-flex items-center gap-1 rounded hover:text-ink"
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded hover:text-ink",
+                        sort === col.key && "text-ink"
+                      )}
                     >
                       {col.label}
                       {sort === col.key &&
@@ -222,71 +283,115 @@ export function BookTable({
                   )}
                 </th>
               ))}
+              <th scope="col" className="w-14 px-3 py-2.5" />
             </tr>
           </thead>
 
           <tbody>
-            {rows.map((p) => {
+            {rows.map((p, index) => {
               const isOpen = expanded === p.id;
+              const hoursLate = p.next_followup_at
+                ? (Date.now() - new Date(p.next_followup_at).getTime()) / 3_600_000
+                : 0;
+              const veryLate = hoursLate >= overdueHours;
+              const readyForDead =
+                p.missing_roobet && p.followup_attempts >= attemptsThreshold;
+
               return (
                 <Fragment key={p.id}>
                   <tr
                     className={cn(
-                      "border-b border-line transition-colors duration-fast last:border-0",
-                      selected.has(p.id) ? "bg-accent-soft/50" : "hover:bg-sunken/60"
+                      "border-b border-line transition-colors duration-fast",
+                      selected.has(p.id)
+                        ? "bg-accent-soft/60"
+                        : isOpen
+                        ? "bg-sunken/70"
+                        : cn(
+                            // Alternating bands give the eye a rail to follow
+                            // across the row without a heavy grid.
+                            index % 2 === 1 && "bg-sunken/35",
+                            "hover:bg-accent-soft/40"
+                          ),
+                      veryLate && !selected.has(p.id) && "border-l-2 border-l-danger"
                     )}
                   >
-                    <td className="px-3 py-2.5 align-middle">
-                      <Checkbox
-                        checked={selected.has(p.id)}
-                        onChange={() => toggleRow(p.id)}
-                        label={`Select ${p.handle}`}
-                      />
+                    <td className="px-3 py-3 align-middle">
+                      {!readOnly && (
+                        <Checkbox
+                          checked={selected.has(p.id)}
+                          onChange={() => toggleRow(p.id)}
+                          label={`Select ${p.handle}`}
+                        />
+                      )}
                     </td>
 
+                    {/* Identity carries the reference and source quietly beneath */}
                     <td className="px-3 py-2.5 align-middle">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium text-ink">{p.handle}</span>
-                        <span className="tabular shrink-0 text-caption text-ink-subtle">
-                          {p.reference}
-                        </span>
+                        {readyForDead && (
+                          <Badge tone="danger" icon={<AlertTriangle size={10} />}>
+                            {p.followup_attempts}
+                          </Badge>
+                        )}
                       </div>
-                      <div className="mt-0.5 flex flex-wrap gap-1">
-                        <PlayerFlags player={p} attemptsThreshold={attemptsThreshold} />
-                      </div>
+                      <p className="tabular mt-0.5 text-caption text-ink-subtle">
+                        {p.reference}
+                        {p.source && ` · ${p.source}`}
+                        {p.first_deposit_at && " · Deposited"}
+                      </p>
                     </td>
 
-                    <td className="px-3 py-2.5 align-middle">
+                    <td className="px-3 py-3 align-middle">
                       {p.roobet_username ? (
-                        <span className="text-small text-ink">{p.roobet_username}</span>
+                        <span className="truncate text-small text-ink">{p.roobet_username}</span>
                       ) : (
                         <button
                           type="button"
                           onClick={() => setExpanded(isOpen ? null : p.id)}
-                          className="text-small text-warning underline-offset-2 hover:underline"
+                          className="text-small font-medium text-warning underline-offset-2 hover:underline"
                         >
                           Add username
                         </button>
                       )}
                     </td>
 
-                    <td className="px-3 py-2.5 align-middle">
-                      <StatusSelect player={p} statuses={statuses} size="sm" />
+                    <td className="px-3 py-3 align-middle">
+                      <StatusSelect
+                        player={p}
+                        statuses={statuses}
+                        size="sm"
+                        disabled={readOnly}
+                      />
                     </td>
 
-                    <td className="px-3 py-2.5 align-middle text-small text-ink-muted">
-                      {p.source ?? "—"}
+                    <td
+                      className={cn(
+                        "tabular px-3 py-3 text-right align-middle text-small",
+                        Number(p.weighted_wager ?? 0) > 0
+                          ? "font-medium text-ink"
+                          : "text-ink-subtle"
+                      )}
+                    >
+                      {Number(p.weighted_wager ?? 0) > 0
+                        ? money(Number(p.weighted_wager))
+                        : "—"}
                     </td>
 
-                    <td className="tabular px-3 py-2.5 align-middle text-small text-ink-muted">
+                    <td className="tabular px-3 py-3 text-right align-middle text-small text-ink-muted">
                       {formatDate(p.last_contact_at, timezone)}
                     </td>
 
-                    <td className="px-3 py-2.5 align-middle">
+                    <td
+                      className={cn(
+                        "px-3 py-3 text-right align-middle",
+                        veryLate && "font-medium"
+                      )}
+                    >
                       <DueLabel player={p} timezone={timezone} overdueHours={overdueHours} />
                     </td>
 
-                    <td className="px-3 py-2.5 align-middle">
+                    <td className="px-3 py-3 text-right align-middle">
                       <button
                         type="button"
                         onClick={() => setExpanded(isOpen ? null : p.id)}
@@ -296,7 +401,7 @@ export function BookTable({
                           "inline-flex h-7 w-7 items-center justify-center rounded-control",
                           "transition-colors duration-fast",
                           isOpen
-                            ? "bg-accent text-white"
+                            ? "bg-accent text-white btn-on-accent"
                             : p.notes
                             ? "text-accent hover:bg-accent-soft"
                             : "text-ink-subtle hover:bg-sunken hover:text-ink"
@@ -309,7 +414,7 @@ export function BookTable({
 
                   {isOpen && (
                     <tr>
-                      <td colSpan={COLUMNS.length + 1} className="p-0">
+                      <td colSpan={COLUMNS.length + 2} className="p-0">
                         <PlayerDetail
                           player={p}
                           timezone={timezone}
@@ -336,31 +441,37 @@ export function BookTable({
               className="overflow-hidden rounded-card border border-line bg-surface shadow-card"
             >
               <div className="flex items-start gap-3 p-3">
-                <Checkbox
-                  checked={selected.has(p.id)}
-                  onChange={() => toggleRow(p.id)}
-                  label={`Select ${p.handle}`}
-                />
+                {!readOnly && (
+                  <Checkbox
+                    checked={selected.has(p.id)}
+                    onChange={() => toggleRow(p.id)}
+                    label={`Select ${p.handle}`}
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     <span className="font-medium text-ink">{p.handle}</span>
                     <span className="tabular text-caption text-ink-subtle">{p.reference}</span>
                   </div>
                   <p className="mt-0.5 text-caption text-ink-subtle">
-                    {p.roobet_username ?? "No Roobet username"} ·{" "}
-                    {p.source ?? "No source"} · Last contact{" "}
+                    {p.roobet_username ?? "No Roobet username"}
+                    {p.source && ` · ${p.source}`} · Last contact{" "}
                     {formatDate(p.last_contact_at, timezone)}
                   </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    <PlayerFlags player={p} attemptsThreshold={attemptsThreshold} />
-                  </div>
                   <div className="mt-2 flex items-center gap-2">
-                    <StatusSelect player={p} statuses={statuses} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <StatusSelect
+                        player={p}
+                        statuses={statuses}
+                        size="sm"
+                        disabled={readOnly}
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => setExpanded(isOpen ? null : p.id)}
                       aria-expanded={isOpen}
-                      className="inline-flex h-8 items-center gap-1 rounded-control px-2
+                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-control px-2
                                  text-small font-medium text-ink-muted hover:bg-sunken"
                     >
                       <MessageSquare size={14} />
@@ -370,11 +481,7 @@ export function BookTable({
                 </div>
               </div>
               {isOpen && (
-                <PlayerDetail
-                  player={p}
-                  timezone={timezone}
-                  onClose={() => setExpanded(null)}
-                />
+                <PlayerDetail player={p} timezone={timezone} onClose={() => setExpanded(null)} />
               )}
             </div>
           );
@@ -384,34 +491,40 @@ export function BookTable({
       {/* Paging */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <p className="tabular text-small text-ink-muted">
-          Page {page} of {pageCount} · {total.toLocaleString()}{" "}
-          {total === 1 ? "player" : "players"}
+          {total === 0
+            ? "Nothing to show"
+            : `${firstOnPage.toLocaleString()}–${lastOnPage.toLocaleString()} of ${total.toLocaleString()}`}
         </p>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setParam({ page: String(page - 1) })}
-            icon={<ChevronLeft size={14} />}
-          >
-            Previous
-          </Button>
-          <Button
-            size="sm"
-            disabled={page >= pageCount}
-            onClick={() => setParam({ page: String(page + 1) })}
-          >
-            Next <ChevronRight size={14} />
-          </Button>
-        </div>
+        {pageCount > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setParam({ page: String(page - 1) })}
+              icon={<ChevronLeft size={14} />}
+            >
+              Previous
+            </Button>
+            <span className="tabular px-1 text-small text-ink-subtle">
+              {page} / {pageCount}
+            </span>
+            <Button
+              size="sm"
+              disabled={page >= pageCount}
+              onClick={() => setParam({ page: String(page + 1) })}
+            >
+              Next <ChevronRight size={14} />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * Checkbox built on a real input so it is keyboard operable and announced
- * correctly; the visible box is drawn on top.
+ * Built on a real input so it is keyboard operable and announced correctly;
+ * the visible box is drawn on top.
  */
 function Checkbox({
   checked,
@@ -434,10 +547,10 @@ function Checkbox({
       <span
         aria-hidden="true"
         className={cn(
-          "flex h-4.5 w-4.5 items-center justify-center rounded border-2 transition-colors duration-fast",
-          "h-[18px] w-[18px]",
+          "flex h-[18px] w-[18px] items-center justify-center rounded border-2",
+          "transition-colors duration-fast",
           checked
-            ? "border-accent bg-accent text-white"
+            ? "border-accent bg-accent text-white btn-on-accent"
             : "border-line-strong bg-surface text-transparent peer-hover:border-ink-subtle"
         )}
       >

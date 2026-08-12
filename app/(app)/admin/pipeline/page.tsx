@@ -2,7 +2,13 @@ import Link from "next/link";
 import { Badge, Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { AlertTriangle, TrendingUp, Wallet } from "@/components/icons";
 import { getMe } from "@/lib/queries";
-import { getCompanyDeposits, getCompanyVip, type CompanyPlayer } from "@/lib/admin";
+import {
+  getCompanyDeposits,
+  getCompanyVip,
+  getWagerReport,
+  type CompanyPlayer,
+} from "@/lib/admin";
+import { resolveRange } from "@/lib/ranges";
 import { formatDate, relativeDays } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +24,18 @@ export default async function PipelinePage() {
   const me = await getMe();
   if (!me) return null;
 
-  const [vip, deposits] = await Promise.all([getCompanyVip(), getCompanyDeposits()]);
+  const monthRange = resolveRange({ period: "mtd" }, me.timezone, "mtd");
+
+  const [vip, deposits, monthWager] = await Promise.all([
+    getCompanyVip(),
+    getCompanyDeposits(),
+    getWagerReport(monthRange.start, monthRange.end),
+  ]);
+
+  // Wager this month for the players sitting at VIP Transferred - the clearest
+  // measure of whether transfers are turning into money.
+  const monthByPlayer = new Map(monthWager.rows.map((r) => [r.playerId, r.windowWager]));
+  const vipMonthWager = vip.reduce((a, p) => a + (monthByPlayer.get(p.id) ?? 0), 0);
 
   const stalled = vip.filter((p) => {
     const due = relativeDays(p.next_followup_at, me.timezone);
@@ -42,7 +59,7 @@ export default async function PipelinePage() {
         </p>
       </div>
 
-      <div className="mb-8 grid gap-3 sm:grid-cols-3">
+      <div className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="VIP transfers waiting" value={vip.length} icon={<TrendingUp size={14} />} />
         <Stat
           label="Stalled 2+ days"
@@ -51,6 +68,20 @@ export default async function PipelinePage() {
           tone={stalled.length > 0 ? "danger" : undefined}
         />
         <Stat label="Deposits this month" value={thisMonth.length} icon={<Wallet size={14} />} />
+        <Stat
+          label="Wagered this month"
+          value={monthWager.total}
+          icon={<Wallet size={14} />}
+          money
+          sub={`${monthWager.playerCount} players`}
+        />
+        <Stat
+          label="From VIP transfers"
+          value={vipMonthWager}
+          icon={<TrendingUp size={14} />}
+          money
+          sub="Still at VIP Transferred"
+        />
       </div>
 
       {/* VIP */}
@@ -242,11 +273,16 @@ function Stat({
   value,
   icon,
   tone,
+  money,
+  sub,
 }: {
   label: string;
   value: number;
   icon: React.ReactNode;
   tone?: "danger";
+  /** Render as dollars rather than a count. */
+  money?: boolean;
+  sub?: string;
 }) {
   return (
     <Card className={cn(tone === "danger" && value > 0 && "border-danger/30")}>
@@ -260,8 +296,11 @@ function Stat({
           tone === "danger" && value > 0 ? "text-danger" : "text-ink"
         )}
       >
-        {value.toLocaleString()}
+        {money
+          ? "$" + value.toLocaleString(undefined, { maximumFractionDigits: 0 })
+          : value.toLocaleString()}
       </p>
+      {sub && <p className="mt-0.5 text-caption text-ink-subtle">{sub}</p>}
     </Card>
   );
 }

@@ -1,6 +1,12 @@
 import { Card, SectionHeader } from "@/components/ui";
-import { getAllSettings, getFunnelStages, getSourcesAdmin } from "@/lib/admin";
+import {
+  getAllSettings,
+  getFunnelStages,
+  getSourcesAdmin,
+  getWagerSources,
+} from "@/lib/admin";
 import { SettingRow, StageRow, SourcesEditor } from "./Editors";
+import { WagerSync } from "./WagerSync";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +23,11 @@ const CATEGORY_HINT: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const [settings, stages, sources] = await Promise.all([
+  const [settings, stages, sources, wagerSources] = await Promise.all([
     getAllSettings(),
     getFunnelStages(),
     getSourcesAdmin(),
+    getWagerSources(),
   ]);
 
   const categories = Array.from(new Set(settings.map((s) => s.category)));
@@ -68,7 +75,7 @@ export default async function SettingsPage() {
       ))}
 
       {/* Sources */}
-      <section>
+      <section className="mb-8">
         <SectionHeader
           title="Lead sources"
           count={sources.length}
@@ -76,6 +83,23 @@ export default async function SettingsPage() {
         />
         <Card padded={false}>
           <SourcesEditor sources={sources} />
+        </Card>
+      </section>
+
+      {/* Wager sources */}
+      <section>
+        <SectionHeader
+          title="Wager sources"
+          count={wagerSources.length}
+          hint="Each leaderboard API with its own key. Sync matches entries to players by Roobet username and keeps a dated snapshot per run, so wager-over-time stays answerable."
+        />
+        <Card padded={false}>
+          <WagerSync
+            sources={wagerSources}
+            cronReady={Boolean(
+              process.env.CRON_SECRET && process.env.SUPABASE_SERVICE_ROLE_KEY
+            )}
+          />
         </Card>
       </section>
     </>

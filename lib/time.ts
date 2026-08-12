@@ -27,6 +27,18 @@ export function endOfDayUtc(timeZone: string, now: Date = new Date()): Date {
   return new Date(start.getTime() + 24 * 60 * 60 * 1000);
 }
 
+/**
+ * Midnight on a given calendar date, in this person's zone.
+ *
+ * Used by the custom date picker: a person choosing 1 August means midnight
+ * where they are, which is a different instant depending on where that is.
+ */
+export function dayStartFromYmd(ymd: string, timeZone: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const d = wallTimeToUtc(`${ymd}T00:00:00`, timeZone);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 /** Midnight N days ahead, in this person's zone. */
 export function startOfDayPlusUtc(
   timeZone: string,

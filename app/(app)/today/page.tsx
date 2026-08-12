@@ -2,8 +2,17 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { TaskRow } from "./TaskRow";
 import { AddPlayer } from "./AddPlayer";
-import { EmptyState, SectionHeader, cn } from "@/components/ui";
-import { CalendarCheck, Clock, Inbox, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
+import { EmptyState, cn } from "@/components/ui";
+import {
+  AlertTriangle,
+  CalendarCheck,
+  Check,
+  Clock,
+  Inbox,
+  TrendingUp,
+  UserCheck,
+  Wallet,
+} from "@/components/icons";
 import {
   getMe,
   getDueNow,
@@ -15,6 +24,10 @@ import {
   getSources,
   getSetting,
 } from "@/lib/queries";
+import { startOfDayUtc } from "@/lib/time";
+import { getChurn } from "@/lib/churn";
+import { ChurnList } from "../ChurnList";
+import type { Player } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -35,19 +48,21 @@ function StatCard({
   const pct = target > 0 ? Math.min(100, Math.round((value / target) * 100)) : 0;
 
   return (
-    <div className="rounded-card border border-line bg-surface p-4 shadow-card">
-      <div className="flex items-center gap-2 text-ink-subtle">
-        {icon}
-        <p className="text-label font-medium uppercase tracking-wide">{label}</p>
+    <div className="rounded-card border border-line bg-surface p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="inline-flex items-center gap-1.5 text-label font-medium uppercase tracking-wide text-ink-subtle">
+          {icon}
+          {label}
+        </p>
+        {hit && (
+          <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
+            <Check size={11} /> Met
+          </span>
+        )}
       </div>
 
       <p className="mt-2 flex items-baseline gap-1.5">
-        <span
-          className={cn(
-            "tabular text-metric font-semibold",
-            hit ? "text-success" : "text-ink"
-          )}
-        >
+        <span className={cn("tabular text-metric font-semibold", hit ? "text-success" : "text-ink")}>
           {value}
         </span>
         <span className="tabular text-small text-ink-subtle">of {target}</span>
@@ -69,14 +84,49 @@ function StatCard({
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  );
+}
 
-      <p className={cn("mt-1.5 text-caption", hit ? "text-success" : "text-ink-subtle")}>
-        {target === 0
-          ? "No target set"
-          : hit
-          ? "Target met"
-          : `${target - value} to go`}
-      </p>
+/* ------------------------------------------------------------ Group header */
+
+function GroupHeader({
+  title,
+  count,
+  hint,
+  tone = "neutral",
+  action,
+}: {
+  title: string;
+  count: number;
+  hint?: string;
+  tone?: "neutral" | "danger" | "accent";
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "h-4 w-1 rounded-full",
+            tone === "danger" ? "bg-danger" : tone === "accent" ? "bg-accent" : "bg-line-strong"
+          )}
+          aria-hidden="true"
+        />
+        <h2
+          className={cn(
+            "text-h3 font-semibold",
+            tone === "danger" ? "text-danger" : "text-ink"
+          )}
+        >
+          {title}
+        </h2>
+        <span className="tabular text-small text-ink-subtle">{count}</span>
+        {hint && (
+          <span className="hidden text-small text-ink-subtle sm:inline">· {hint}</span>
+        )}
+      </div>
+      {action}
     </div>
   );
 }
@@ -103,7 +153,7 @@ export default async function TodayPage({
   const attemptsThreshold = Number(attemptsRaw) || 3;
   const overdueHours = Number(overdueRaw) || 24;
 
-  const [dueNow, comingUp, deadLeads, stats, targets, statuses, sources] =
+  const [dueNow, comingUp, deadLeads, stats, targets, statuses, sources, churn] =
     await Promise.all([
       getDueNow(me),
       getComingUp(me, comingUpDays),
@@ -112,32 +162,122 @@ export default async function TodayPage({
       getTargets(me),
       getStatuses(),
       getSources(),
+      getChurn(me.timezone, me.id),
     ]);
 
-  const rowProps = { statuses, timezone: me.timezone, attemptsThreshold, overdueHours };
+  /**
+   * Split the queue into overdue and due-today.
+   *
+   * One flat list of forty people gives no sense of what matters. Two short
+   * lists do, and the grouping is what carries the red rather than every row
+   * shouting individually.
+   *
+   * Someone never contacted counts as due today - they are waiting on a first
+   * conversation, which is exactly as urgent as a follow-up landing today.
+   */
+  const dayStart = startOfDayUtc(me.timezone).getTime();
+  const overdue: Player[] = [];
+  const dueToday: Player[] = [];
+
+  for (const p of dueNow) {
+    const late =
+      p.last_contact_at !== null &&
+      p.next_followup_at !== null &&
+      new Date(p.next_followup_at).getTime() < dayStart;
+    if (late) overdue.push(p);
+    else dueToday.push(p);
+  }
+
+  const rowProps = {
+    statuses,
+    timezone: me.timezone,
+    attemptsThreshold,
+    overdueHours,
+    dayStartMs: dayStart,
+  };
+  const clear = dueNow.length === 0;
 
   return (
     <>
       {justReset && (
-        <div className="mb-5 flex items-center gap-2 rounded-card border border-success/25
-                        bg-success-soft px-4 py-2.5 text-small text-success" role="status">
+        <div
+          role="status"
+          className="mb-5 flex items-center gap-2 rounded-card border border-success/25
+                     bg-success-soft px-4 py-2.5 text-small text-success"
+        >
           <UserCheck size={15} />
           Password changed and you&rsquo;re signed in.
         </div>
       )}
 
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-h1 font-semibold tracking-tight text-ink">
-            Today&rsquo;s work
-          </h1>
+          <h1 className="text-h1 font-semibold tracking-tight text-ink">Today</h1>
           <p className="mt-0.5 text-body text-ink-muted">
-            {dueNow.length === 0
-              ? "Nothing due right now."
+            {clear
+              ? "Your queue is clear."
               : `${dueNow.length} ${dueNow.length === 1 ? "person" : "people"} to reach out to.`}
           </p>
         </div>
-        <AddPlayer sources={sources} defaultSource={me.default_source} />
+        <AddPlayer
+          sources={sources}
+          defaultSource={me.default_source}
+          statuses={statuses as { name: string }[]}
+        />
+      </div>
+
+      {/* Whether today's work is done, said once and plainly. */}
+      <div
+        role="status"
+        className={cn(
+          "mb-6 flex flex-wrap items-center gap-3 rounded-card border px-4 py-3",
+          overdue.length > 0
+            ? "border-danger/30 bg-danger-soft"
+            : clear
+            ? "border-success/25 bg-success-soft"
+            : "border-line bg-surface"
+        )}
+      >
+        <span
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            overdue.length > 0
+              ? "bg-danger/10 text-danger"
+              : clear
+              ? "bg-success/10 text-success"
+              : "bg-sunken text-ink-muted"
+          )}
+        >
+          {overdue.length > 0 ? (
+            <AlertTriangle size={16} />
+          ) : clear ? (
+            <Check size={16} />
+          ) : (
+            <CalendarCheck size={16} />
+          )}
+        </span>
+
+        <div className="min-w-0">
+          <p
+            className={cn(
+              "text-body font-semibold",
+              overdue.length > 0 ? "text-danger" : clear ? "text-success" : "text-ink"
+            )}
+          >
+            {overdue.length > 0
+              ? `${overdue.length} overdue`
+              : clear
+              ? "Nothing due"
+              : `${dueNow.length} to do today`}
+          </p>
+          <p className="mt-0.5 text-small text-ink-muted">
+            {overdue.length > 0
+              ? "These were due before today. Work them first — they've waited longest."
+              : clear
+              ? "Everyone has been contacted recently. Add a player, or work ahead from Coming up."
+              : "Nothing is overdue. Clear these and you're done for the day."}
+          </p>
+        </div>
       </div>
 
       {/* Targets */}
@@ -150,80 +290,134 @@ export default async function TodayPage({
             label="Active leads"
             value={stats.activeLeads}
             target={targets.activeLeads}
-            icon={<UserCheck size={14} />}
+            icon={<UserCheck size={13} />}
           />
           <StatCard
             label="VIP transfers"
             value={stats.vipTransfers}
             target={targets.vipTransfers}
-            icon={<TrendingUp size={14} />}
+            icon={<TrendingUp size={13} />}
           />
           <StatCard
             label="First deposits"
             value={stats.ftds}
             target={targets.ftds}
-            icon={<Wallet size={14} />}
+            icon={<Wallet size={13} />}
           />
         </div>
       </section>
 
-      {/* Queue */}
-      <section aria-labelledby="queue-heading" className="mb-8">
-        <SectionHeader
-          title="Today's queue"
-          count={dueNow.length}
-          hint="Longest neglected first. Tick one off and it leaves until it's due again."
-        />
-        {dueNow.length === 0 ? (
+      {/* Overdue */}
+      {overdue.length > 0 && (
+        <section className="mb-7">
+          <GroupHeader
+            title="Overdue"
+            count={overdue.length}
+            hint="due before today"
+            tone="danger"
+          />
+          <div className="space-y-1.5">
+            {overdue.map((p) => (
+              <TaskRow key={p.id} player={p} {...rowProps} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Due today */}
+      {dueToday.length > 0 && (
+        <section className="mb-7">
+          <GroupHeader title="Due today" count={dueToday.length} tone="accent" />
+          <div className="space-y-1.5">
+            {dueToday.map((p) => (
+              <TaskRow key={p.id} player={p} {...rowProps} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {clear && (
+        <section className="mb-8">
           <EmptyState
             icon={<CalendarCheck size={18} />}
             title="Nothing due today"
             body="Everyone in your book has been contacted recently. Add a player, or work ahead from Coming up."
           />
-        ) : (
-          <div className="space-y-2">
-            {dueNow.map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} />
-            ))}
-          </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* Coming up - always present, so its absence is never mistaken for a bug */}
-      <section aria-labelledby="coming-heading" className="mb-8">
-        <SectionHeader
+      {/* Falling away. Above Coming up on purpose - a whale who stopped
+          wagering outranks a routine follow-up scheduled for Thursday. */}
+      {(churn.quiet.length > 0 || churn.dropping.length > 0) && (
+        <section className="mb-7">
+          <GroupHeader
+            title="Falling away"
+            count={churn.quiet.length + churn.dropping.length}
+            hint={`wagering dropped over the last ${churn.windowDays} days`}
+            tone="danger"
+          />
+          <div className="space-y-1.5">
+            {churn.quiet.length > 0 && (
+              <ChurnList players={churn.quiet} kind="quiet" windowDays={churn.windowDays} limit={8} />
+            )}
+            {churn.dropping.length > 0 && (
+              <ChurnList
+                players={churn.dropping}
+                kind="dropping"
+                windowDays={churn.windowDays}
+                limit={5}
+              />
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Coming up - always present, so its absence is never taken for a bug */}
+      <section className="mb-7">
+        <GroupHeader
           title="Coming up"
           count={comingUp.length}
-          hint={`Due within the next ${comingUpDays} days. Nothing to do yet.`}
+          hint={`next ${comingUpDays} days — nothing to do yet`}
         />
         {comingUp.length === 0 ? (
           <EmptyState
             icon={<Clock size={18} />}
             title="Nothing scheduled in the next few days"
-            body="Follow-ups appear here once someone's next contact date is within the window."
+            body="Follow-ups appear here once someone's next contact date falls inside the window."
           />
         ) : (
-          <div className="space-y-2 opacity-90">
-            {comingUp.map((p) => (
+          <div className="space-y-1.5 opacity-90">
+            {comingUp.slice(0, 20).map((p) => (
               <TaskRow key={p.id} player={p} {...rowProps} showComplete={false} />
             ))}
+            {comingUp.length > 20 && (
+              <p className="pt-1 text-small text-ink-muted">
+                Showing 20 of {comingUp.length}.{" "}
+                <Link href="/book" className="font-medium text-accent hover:underline">
+                  See the rest in Book
+                </Link>
+                .
+              </p>
+            )}
           </div>
         )}
       </section>
 
       {/* Dead leads */}
-      <section aria-labelledby="dead-heading">
-        <SectionHeader
+      <section>
+        <GroupHeader
           title="Dead leads"
           count={deadLeads.length}
-          hint="Soonest retarget first. Work these whenever you like — they also rejoin the queue when their 30 days is up."
+          hint="soonest retarget first — they rejoin the queue when their 30 days is up"
           action={
-            <Link
-              href="/book?flag=dead"
-              className="text-small font-medium text-accent underline-offset-2 hover:underline"
-            >
-              See all in Book
-            </Link>
+            deadLeads.length > 0 ? (
+              <Link
+                href="/book?flag=dead"
+                className="text-small font-medium text-accent underline-offset-2 hover:underline"
+              >
+                See all in Book
+              </Link>
+            ) : undefined
           }
         />
         {deadLeads.length === 0 ? (
@@ -233,13 +427,13 @@ export default async function TodayPage({
             body="Nobody has been marked Dead Lead yet. When someone stops responding, set their status and they'll wait here for a retarget."
           />
         ) : (
-          <div className="space-y-2">
-            {deadLeads.slice(0, 25).map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} />
+          <div className="space-y-1.5">
+            {deadLeads.slice(0, 20).map((p) => (
+              <TaskRow key={p.id} player={p} {...rowProps} showComplete={false} />
             ))}
-            {deadLeads.length > 25 && (
+            {deadLeads.length > 20 && (
               <p className="pt-1 text-small text-ink-muted">
-                Showing 25 of {deadLeads.length}.{" "}
+                Showing 20 of {deadLeads.length}.{" "}
                 <Link href="/book?flag=dead" className="font-medium text-accent hover:underline">
                   See the rest in Book
                 </Link>
@@ -250,8 +444,7 @@ export default async function TodayPage({
         )}
       </section>
 
-      <p className="mt-10 flex items-center gap-1.5 text-caption text-ink-subtle">
-        <Target size={12} />
+      <p className="mt-10 text-caption text-ink-subtle">
         Times shown in {me.timezone.replace("_", " ")} — your own time zone decides what
         &ldquo;today&rdquo; means.
       </p>

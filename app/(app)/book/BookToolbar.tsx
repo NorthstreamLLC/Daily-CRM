@@ -3,26 +3,34 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Input, Select, cn } from "@/components/ui";
-import { Search, Sliders, X } from "@/components/icons";
+import { Search, X } from "@/components/icons";
+import { PAGE_SIZES } from "@/lib/pagination";
 
-export type Chip = { key: string; label: string; count: number; tone?: "warning" | "danger" | "success" };
+export type Chip = {
+  key: string;
+  label: string;
+  count: number;
+  tone?: "warning" | "danger" | "success";
+};
 
 /**
  * Search and filters for the Book.
  *
  * All state lives in the URL rather than in component state. That makes a
  * filtered view shareable and bookmarkable, survives a refresh, and means the
- * back button does what you expect - none of which is true if filters are held
- * in memory.
+ * back button does what you expect - none of which is true when filters are
+ * held in memory.
  */
 export function BookToolbar({
   statuses,
   sources,
   chips,
+  pageSize,
 }: {
   statuses: string[];
   sources: string[];
   chips: Chip[];
+  pageSize: number;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -38,8 +46,8 @@ export function BookToolbar({
       if (value === null || value === "") sp.delete(key);
       else sp.set(key, value);
     }
-    // Any change to the filters puts you back on page one; staying on page 7 of
-    // a result set that now has two pages shows an empty table.
+    // Any filter change returns you to page one; staying on page 7 of a result
+    // set that now has two pages shows an empty table.
     if (!("page" in next)) sp.delete("page");
     start(() => router.replace(`${pathname}?${sp.toString()}`, { scroll: false }));
   }
@@ -61,7 +69,39 @@ export function BookToolbar({
   const hasFilters = Boolean(q || activeFlag || activeStatus || activeSource);
 
   return (
-    <div className="mb-4 space-y-3">
+    <div className="mb-4 space-y-2.5">
+      {/* Quick filters double as a health check on the book. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((chip) => {
+          const active = activeFlag === chip.key;
+          const alarming = chip.count > 0 && (chip.tone === "danger" || chip.tone === "warning");
+          return (
+            <button
+              key={chip.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => apply({ flag: active ? null : chip.key })}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1",
+                "text-small font-medium transition-colors duration-fast",
+                active
+                  ? "border-accent bg-accent text-white btn-on-accent"
+                  : alarming
+                  ? chip.tone === "danger"
+                    ? "border-danger/30 bg-danger-soft text-danger hover:border-danger/50"
+                    : "border-warning/30 bg-warning-soft text-warning hover:border-warning/50"
+                  : "border-line-strong bg-surface text-ink-muted hover:bg-sunken hover:text-ink"
+              )}
+            >
+              {chip.label}
+              <span className={cn("tabular", active ? "text-white/70" : "opacity-60")}>
+                {chip.count.toLocaleString()}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-subtle">
@@ -71,7 +111,7 @@ export function BookToolbar({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search handle, Roobet username or reference"
-            aria-label="Search your book"
+            aria-label="Search this book"
             className="pl-8"
           />
           {q && (
@@ -79,8 +119,7 @@ export function BookToolbar({
               type="button"
               onClick={() => setQ("")}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5
-                         text-ink-subtle hover:text-ink"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-subtle hover:text-ink"
             >
               <X size={14} />
             </button>
@@ -91,7 +130,7 @@ export function BookToolbar({
           value={activeStatus}
           aria-label="Filter by status"
           onChange={(e) => apply({ status: e.target.value || null })}
-          className="w-auto min-w-[150px]"
+          className="w-auto min-w-[148px]"
         >
           <option value="">All statuses</option>
           {statuses.map((s) => (
@@ -105,12 +144,25 @@ export function BookToolbar({
           value={activeSource}
           aria-label="Filter by source"
           onChange={(e) => apply({ source: e.target.value || null })}
-          className="w-auto min-w-[130px]"
+          className="w-auto min-w-[128px]"
         >
           <option value="">All sources</option>
           {sources.map((s) => (
             <option key={s} value={s}>
               {s}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={String(pageSize)}
+          aria-label="Players per page"
+          onChange={(e) => apply({ size: e.target.value })}
+          className="w-auto"
+        >
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              Show {n}
             </option>
           ))}
         </Select>
@@ -128,37 +180,8 @@ export function BookToolbar({
             <X size={14} /> Clear
           </button>
         )}
-      </div>
 
-      {/* Quick filters that double as a health check on the book. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 inline-flex items-center gap-1 text-caption text-ink-subtle">
-          <Sliders size={12} /> Quick filters
-        </span>
-        {chips.map((chip) => {
-          const active = activeFlag === chip.key;
-          return (
-            <button
-              key={chip.key}
-              type="button"
-              aria-pressed={active}
-              onClick={() => apply({ flag: active ? null : chip.key || null })}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
-                "text-caption font-medium transition-colors duration-fast",
-                active
-                  ? "border-accent bg-accent text-white"
-                  : "border-line-strong bg-surface text-ink-muted hover:bg-sunken hover:text-ink"
-              )}
-            >
-              {chip.label}
-              <span className={cn("tabular", active ? "text-white/75" : "text-ink-subtle")}>
-                {chip.count}
-              </span>
-            </button>
-          );
-        })}
-        {pending && <span className="ml-1 text-caption text-ink-subtle">Updating…</span>}
+        {pending && <span className="text-caption text-ink-subtle">Updating…</span>}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { signIn, requestPasswordReset, type AuthState } from "./actions";
 import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Mark, PartnerStrip, PRODUCT_NAME } from "@/components/Brand";
 
 /**
  * Lives inside the <form> on purpose - useFormStatus only reports on the form
@@ -33,7 +34,10 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-7 text-center">
-          <h1 className="text-h1 font-semibold tracking-tight text-ink">Daily Gamba</h1>
+          <span className="mx-auto mb-4 flex w-fit">
+            <Mark size={44} rounded="xl" />
+          </span>
+          <h1 className="text-h1 font-semibold tracking-tight text-ink">{PRODUCT_NAME}</h1>
           <p className="mt-1 text-body text-ink-muted">
             {mode === "signin" ? "Sign in to your queue" : "Reset your password"}
           </p>
@@ -106,7 +110,9 @@ export default function LoginPage() {
           </button>
         </Card>
 
-        <p className="mt-6 text-center text-caption text-ink-subtle">
+        <PartnerStrip className="mt-6" />
+
+        <p className="mt-4 text-center text-caption text-ink-subtle">
           Trouble signing in? Ask an admin to send you a reset link.
         </p>
       </div>

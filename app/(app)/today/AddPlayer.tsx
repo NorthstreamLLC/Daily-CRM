@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { addPlayer, type ActionState } from "../actions";
-import { Button, Field, Input, Select, Textarea, Notice, Card } from "@/components/ui";
-import { Plus, X } from "@/components/icons";
+import { Button, Card, Field, Input, Select, Textarea, Notice, cn } from "@/components/ui";
+import { Check, Plus, X } from "@/components/icons";
 
 function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus();
@@ -18,20 +18,51 @@ function Submit({ label }: { label: string }) {
 /**
  * ADD A PLAYER.
  *
- * The duplicate check runs on the server against every rep's book, not just
- * yours. A clash in someone else's book is a warning rather than a block -
- * two people can genuinely share a handle across platforms - so the form
- * offers to add anyway, but only after saying whose book it is already in.
+ * Two decisions the app must not make on your behalf:
+ *
+ *   Have you spoken to them? If yes, that is the first contact and they are not
+ *   a task today. If no, they belong in today's queue with a tick box. Guessing
+ *   either way means the queue lies about what is left to do.
+ *
+ *   What stage are they at? Usually a new lead, but a dead one being added for
+ *   the record should not be dropped into the daily queue.
+ *
+ * The duplicate check runs on the server against every rep's book. A clash in
+ * someone else's book is a warning rather than a block - two people can
+ * genuinely share a handle across platforms - so the form offers to add anyway,
+ * but only after saying whose book it is already in.
  */
 export function AddPlayer({
   sources,
   defaultSource,
+  statuses,
 }: {
   sources: string[];
   defaultSource: string | null;
+  statuses: { name: string }[];
 }) {
   const [open, setOpen] = useState(false);
+  const [contacted, setContacted] = useState(true);
   const [state, formAction] = useFormState<ActionState, FormData>(addPlayer, null);
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const handleRef = useRef<HTMLInputElement>(null);
+  const lastMessage = useRef<string | undefined>(undefined);
+
+  /**
+   * Clear the form once a player is actually created.
+   *
+   * Reps add several people in a row, so the form stays open with the cursor
+   * back in the handle field - but leaving the previous name sitting there is
+   * how you end up adding the same person twice.
+   */
+  useEffect(() => {
+    if (!state?.message || state.message === lastMessage.current) return;
+    lastMessage.current = state.message;
+    formRef.current?.reset();
+    setContacted(true);
+    handleRef.current?.focus();
+  }, [state?.message]);
 
   if (!open) {
     return (
@@ -42,8 +73,8 @@ export function AddPlayer({
   }
 
   return (
-    <Card className="mb-3">
-      <form action={formAction}>
+    <Card className="mb-4">
+      <form ref={formRef} action={formAction}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-h3 font-semibold text-ink">Add a player</h3>
           <button
@@ -58,8 +89,9 @@ export function AddPlayer({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Player handle" htmlFor="handle" className="lg:col-span-1">
+          <Field label="Player handle" htmlFor="handle">
             <Input
+              ref={handleRef}
               id="handle"
               name="handle"
               required
@@ -83,7 +115,7 @@ export function AddPlayer({
           <Field
             label="Roobet username"
             htmlFor="roobet_username"
-            hint="Leave blank if they haven't signed up — they'll stay in your queue daily."
+            hint="Blank if they haven't signed up — they'll stay in your queue daily."
           >
             <Input
               id="roobet_username"
@@ -93,18 +125,50 @@ export function AddPlayer({
             />
           </Field>
 
-          <Field label="Notes" htmlFor="notes">
-            <Textarea id="notes" name="notes" rows={1} placeholder="optional" />
+          <Field label="Stage" htmlFor="status" hint="Add a dead lead here just to keep track.">
+            <Select id="status" name="status" defaultValue="Initial Contact">
+              {statuses.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Notes" htmlFor="notes" className="sm:col-span-2 lg:col-span-4">
+            <Textarea id="notes" name="notes" rows={2} placeholder="optional" />
           </Field>
         </div>
 
-        {/* Set by the "add anyway" button when a clash was reported. */}
+        {/* The one thing the app must not assume. */}
+        <fieldset className="mt-3">
+          <legend className="mb-1.5 text-label font-medium text-ink-muted">
+            Have you contacted them yet?
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            <Choice
+              checked={contacted}
+              onSelect={() => setContacted(true)}
+              title="Yes, I've reached out"
+              body="Logs the contact. Not a task today."
+            />
+            <Choice
+              checked={!contacted}
+              onSelect={() => setContacted(false)}
+              title="No, not yet"
+              body="Goes into today's queue with a tick box."
+            />
+          </div>
+          <input type="hidden" name="contacted" value={contacted ? "1" : "0"} />
+        </fieldset>
+
+        {/* Set once a clash has been reported, so the next submit goes through. */}
         <input type="hidden" name="force" value={state?.warning ? "1" : "0"} />
 
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-4 flex items-center gap-2">
           <Submit label={state?.warning ? "Add anyway" : "Add player"} />
           <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-            Cancel
+            Done
           </Button>
         </div>
 
@@ -125,5 +189,50 @@ export function AddPlayer({
         )}
       </form>
     </Card>
+  );
+}
+
+/** A radio in everything but appearance - keyboard and screen readers included. */
+function Choice({
+  checked,
+  onSelect,
+  title,
+  body,
+}: {
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  body: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      onClick={onSelect}
+      className={cn(
+        "flex min-w-[220px] flex-1 items-start gap-2.5 rounded-control border px-3 py-2.5",
+        "text-left transition-colors duration-fast",
+        checked
+          ? "border-accent bg-accent-soft"
+          : "border-line-strong bg-surface hover:bg-sunken"
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
+          checked ? "border-accent bg-accent text-white btn-on-accent" : "border-line-strong text-transparent"
+        )}
+      >
+        <Check size={10} />
+      </span>
+      <span className="min-w-0">
+        <span className={cn("block text-small font-medium", checked ? "text-accent" : "text-ink")}>
+          {title}
+        </span>
+        <span className="block text-caption text-ink-subtle">{body}</span>
+      </span>
+    </button>
   );
 }

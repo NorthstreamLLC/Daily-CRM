@@ -10,6 +10,7 @@
  * components and become client components automatically when a client component
  * imports them.
  */
+import { forwardRef } from "react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -38,7 +39,7 @@ const BUTTON_BASE =
   "whitespace-nowrap";
 
 const BUTTON_VARIANT = {
-  primary: "bg-accent text-white hover:bg-accent-hover",
+  primary: "bg-accent text-white btn-on-accent hover:bg-accent-hover",
   secondary:
     "bg-surface text-ink border border-line-strong hover:bg-sunken",
   ghost: "text-ink-muted hover:bg-sunken hover:text-ink",
@@ -96,12 +97,15 @@ const FIELD_BASE =
   "hover:border-ink-subtle focus:border-accent focus:outline-none " +
   "focus-visible:outline-none disabled:bg-sunken disabled:text-ink-muted";
 
-export function Input({
-  className,
-  ...rest
-}: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cn(FIELD_BASE, "h-9", className)} {...rest} />;
-}
+/**
+ * Forwards its ref, so a caller can focus it - the add form puts the cursor
+ * back in the handle field after each player is created.
+ */
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className, ...rest }, ref) {
+    return <input ref={ref} className={cn(FIELD_BASE, "h-9", className)} {...rest} />;
+  }
+);
 
 export function Select({
   className,

@@ -733,6 +733,136 @@ export async function runImport(
   };
 }
 
+/**
+ * Retire every currently unclaimed wagerer.
+ *
+ * Hundreds of usernames were wagering before the CRM existed and will never be
+ * claimed. They stay in every company total; this just clears them out of the
+ * working list so the few genuinely new names are visible.
+ */
+export async function retireUnclaimedWagerers(): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("retire_unclaimed_wagerers");
+
+  if (error) {
+    return {
+      error: /does not exist|schema cache/i.test(error.message)
+        ? "Run migration 20260812000014_corrections.sql first."
+        : error.message,
+    };
+  }
+
+  await audit(me.id, "retire_unclaimed_wagerers", null, { count: data });
+  refresh();
+
+  return {
+    message:
+      `${data ?? 0} pre-existing wagerers retired. They still count in company ` +
+      `totals — only new names will appear in this list from now on.`,
+  };
+}
+
+/* ------------------------------------------------------------ Wager sources */
+
+/**
+ * Add a leaderboard source.
+ *
+ * The key goes straight into the admin-only table and is never echoed back -
+ * every read after this masks it to the last four characters.
+ */
+export async function addWagerSource(
+  _prev: AdminState,
+  formData: FormData
+): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  const url = String(formData.get("url") ?? "").trim();
+  const apiKey = String(formData.get("api_key") ?? "").trim();
+  const authStyle = String(formData.get("auth_style") ?? "bearer");
+  const headerName = String(formData.get("header_name") ?? "x-api-key").trim();
+
+  if (!name) return { error: "Give the source a name — e.g. RoobetCasinoRewards." };
+  if (!/^https:\/\//.test(url)) return { error: "The URL must start with https://." };
+  if (!apiKey) return { error: "Paste the API key." };
+  if (!["bearer", "header", "query"].includes(authStyle)) {
+    return { error: "Pick how the key is sent." };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.from("wager_sources").insert({
+    name,
+    url,
+    api_key: apiKey,
+    auth_style: authStyle,
+    header_name: headerName || "x-api-key",
+  });
+
+  if (error) {
+    return error.message.includes("duplicate")
+      ? { error: `A source called "${name}" already exists.` }
+      : { error: error.message };
+  }
+
+  await audit(me.id, "add_wager_source", null, { name, url });
+  refresh();
+  return { message: `"${name}" added. Run a sync to test it.` };
+}
+
+export async function setWagerSourceActive(
+  sourceId: string,
+  active: boolean
+): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("wager_sources")
+    .update({ active })
+    .eq("id", sourceId);
+
+  if (error) return { error: error.message };
+  await audit(me.id, active ? "enable_wager_source" : "disable_wager_source", null, {
+    sourceId,
+  });
+  refresh();
+  return { message: active ? "Source enabled." : "Source paused — it will be skipped." };
+}
+
+export async function deleteWagerSource(sourceId: string): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const supabase = createClient();
+  const { error } = await supabase.from("wager_sources").delete().eq("id", sourceId);
+  if (error) return { error: error.message };
+
+  await audit(me.id, "delete_wager_source", null, { sourceId });
+  refresh();
+  return { message: "Source removed. Its past snapshots are kept." };
+}
+
 /** Undo an import completely, as long as nobody has worked those players yet. */
 export async function undoImport(batchId: string): Promise<AdminState> {
   let me;

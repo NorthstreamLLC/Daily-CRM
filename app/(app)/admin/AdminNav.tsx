@@ -6,6 +6,7 @@ import { cn } from "@/components/ui";
 
 const TABS = [
   { href: "/admin", label: "Overview" },
+  { href: "/admin/wager", label: "Wager" },
   { href: "/admin/users", label: "People" },
   { href: "/admin/pipeline", label: "Company pipeline" },
   { href: "/admin/settings", label: "Settings" },

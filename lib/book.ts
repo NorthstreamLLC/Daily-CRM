@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Me, Player } from "@/lib/queries";
+import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 
-export const BOOK_PAGE_SIZE = 50;
+export { PAGE_SIZES, DEFAULT_PAGE_SIZE, resolvePageSize } from "@/lib/pagination";
 
 export type BookSort =
   | "handle"
@@ -10,7 +11,8 @@ export type BookSort =
   | "source"
   | "assigned_at"
   | "last_contact_at"
-  | "next_followup_at";
+  | "next_followup_at"
+  | "weighted_wager";
 
 export type BookFilters = {
   q: string;
@@ -20,6 +22,7 @@ export type BookFilters = {
   sort: BookSort;
   dir: "asc" | "desc";
   page: number;        // 1-based
+  pageSize: number;
 };
 
 export type BookResult = {
@@ -27,6 +30,7 @@ export type BookResult = {
   total: number;
   page: number;
   pageCount: number;
+  pageSize: number;
 };
 
 /**
@@ -43,7 +47,7 @@ const FIELDS =
   "id, reference, handle, source, roobet_username, status, kyc_status, " +
   "deposit_status, notes, assigned_at, last_contact_at, followup_attempts, " +
   "next_followup_at, next_action, missing_roobet, is_dead, is_ftd, " +
-  "first_deposit_at, owner_id";
+  "first_deposit_at, owner_id, weighted_wager";
 
 /**
  * THE BOOK.
@@ -61,8 +65,9 @@ export async function getBook(
   ownerId?: string
 ): Promise<BookResult> {
   const supabase = createClient();
+  const pageSize = filters.pageSize || DEFAULT_PAGE_SIZE;
   const page = Math.max(1, filters.page);
-  const from = (page - 1) * BOOK_PAGE_SIZE;
+  const from = (page - 1) * pageSize;
 
   let query = supabase
     .from("players_enriched")
@@ -88,7 +93,7 @@ export async function getBook(
 
   const { data, error, count } = await query
     .order(filters.sort, { ascending: filters.dir === "asc", nullsFirst: false })
-    .range(from, from + BOOK_PAGE_SIZE - 1);
+    .range(from, from + pageSize - 1);
 
   if (error) throw error;
 
@@ -97,7 +102,8 @@ export async function getBook(
     rows: (data ?? []) as unknown as Player[],
     total,
     page,
-    pageCount: Math.max(1, Math.ceil(total / BOOK_PAGE_SIZE)),
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
   };
 }
 

@@ -3,39 +3,50 @@ import type { Config } from "tailwindcss";
 /**
  * DESIGN TOKENS.
  *
- * One palette, one type scale, one radius scale. Every screen pulls from here,
- * so the app cannot drift into looking like three different products.
+ * Every colour is a CSS variable defined in globals.css, with a light and a
+ * dark value. Components only ever reference the token name, so dark mode is
+ * a root-class flip - no per-component dark: variants, and no way for one
+ * screen to drift out of theme.
  *
- * The accent is used sparingly - primary buttons, active nav, focus rings and
- * nothing else. Status colour is carried by semantic tokens so red always means
- * the same thing wherever it appears.
+ * The shell (sidebar) palette is deliberately static: it is dark in both
+ * themes, which is what keeps the frame recognisable when the content flips.
  */
+const v = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
+  darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        canvas: "#F6F7F9",          // page background
-        surface: "#FFFFFF",         // cards, rows, inputs
-        sunken: "#F1F3F6",          // table headers, inset panels
+        canvas: v("canvas"),
+        surface: v("surface"),
+        sunken: v("sunken"),
 
-        line: "#E4E7EC",            // default border
-        "line-strong": "#CFD5DE",   // input borders, dividers that must read
+        line: v("line"),
+        "line-strong": v("line-strong"),
 
-        ink: "#151A22",             // primary text
-        "ink-muted": "#5A6472",     // secondary text
-        "ink-subtle": "#8B95A3",    // captions, placeholders
+        ink: v("ink"),
+        "ink-muted": v("ink-muted"),
+        "ink-subtle": v("ink-subtle"),
 
-        accent: "#1F3864",          // brand navy, carried over from the sheets
-        "accent-hover": "#2B4A7D",
-        "accent-soft": "#EDF1F8",
+        accent: v("accent"),
+        "accent-hover": v("accent-hover"),
+        "accent-soft": v("accent-soft"),
 
-        success: "#0E7A4D",
-        "success-soft": "#E7F4ED",
-        warning: "#8A5A00",
-        "warning-soft": "#FCF3E3",
-        danger: "#B42318",
-        "danger-soft": "#FDECEA",
+        success: v("success"),
+        "success-soft": v("success-soft"),
+        warning: v("warning"),
+        "warning-soft": v("warning-soft"),
+        danger: v("danger"),
+        "danger-soft": v("danger-soft"),
+
+        // The application frame - constant across both themes.
+        shell: "#131C2E",
+        "shell-raised": "#1B2740",
+        "shell-line": "#26334D",
+        "shell-ink": "#E8ECF3",
+        "shell-ink-muted": "#93A0B7",
       },
 
       fontFamily: {
@@ -64,16 +75,15 @@ const config: Config = {
       },
 
       borderRadius: {
-        control: "8px",   // buttons, inputs, selects
-        card: "12px",     // cards, table shells
-        panel: "16px",    // drawers, modals
+        control: "8px",
+        card: "12px",
+        panel: "16px",
       },
 
       boxShadow: {
-        // Subtle by design. Elevation is communicated by borders first.
-        card: "0 1px 2px rgba(21, 26, 34, 0.04)",
-        raised: "0 2px 8px rgba(21, 26, 34, 0.06), 0 1px 2px rgba(21, 26, 34, 0.04)",
-        overlay: "0 16px 48px rgba(21, 26, 34, 0.16)",
+        card: "0 1px 2px rgba(10, 14, 20, 0.05)",
+        raised: "0 2px 8px rgba(10, 14, 20, 0.07), 0 1px 2px rgba(10, 14, 20, 0.05)",
+        overlay: "0 16px 48px rgba(10, 14, 20, 0.28)",
       },
 
       transitionDuration: {

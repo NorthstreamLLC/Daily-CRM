@@ -22,6 +22,7 @@ export type Player = {
   is_ftd?: boolean;
   first_deposit_at?: string | null;
   owner_id?: string;
+  weighted_wager?: number | null;
 };
 
 export type Me = {
@@ -36,7 +37,7 @@ export type Me = {
 const PLAYER_FIELDS =
   "id, reference, handle, source, roobet_username, status, kyc_status, " +
   "deposit_status, notes, assigned_at, last_contact_at, followup_attempts, " +
-  "next_followup_at, next_action, missing_roobet, is_dead";
+  "next_followup_at, next_action, missing_roobet, is_dead, weighted_wager";
 
 export async function getMe(): Promise<Me | null> {
   const supabase = createClient();
@@ -102,9 +103,24 @@ export async function getDueNow(me: Me): Promise<Player[]> {
   return (data ?? []) as unknown as Player[];
 }
 
-/** Not due yet, but landing within the configured window. Visibility only. */
+/**
+ * COMING UP.
+ *
+ * Nothing to do yet - this is the schedule, not the work. Two kinds of player
+ * belong here:
+ *
+ *   - anyone whose next contact date falls inside the window
+ *   - anyone added and contacted today, whatever their next date is
+ *
+ * That second rule matters. Someone added today is due tomorrow at the earliest,
+ * so they are not a task - but leaving them out made this list read "0" on a day
+ * five people had just been added, which is worse than useless. And a player
+ * moved straight to Active would be due in fourteen days, outside the window,
+ * and would have vanished from the page entirely on the day they were created.
+ */
 export async function getComingUp(me: Me, windowDays: number): Promise<Player[]> {
   const supabase = createClient();
+  const startToday = startOfDayUtc(me.timezone).toISOString();
   const endToday = endOfDayUtc(me.timezone).toISOString();
   const horizon = startOfDayPlusUtc(me.timezone, windowDays + 1).toISOString();
 
@@ -112,9 +128,10 @@ export async function getComingUp(me: Me, windowDays: number): Promise<Player[]>
     .from("players_enriched")
     .select(PLAYER_FIELDS)
     .eq("is_dead", false)
-    .eq("missing_roobet", false)
-    .gt("next_followup_at", endToday)
-    .lte("next_followup_at", horizon)
+    .or(
+      `and(missing_roobet.eq.false,next_followup_at.gt.${endToday},next_followup_at.lte.${horizon}),` +
+        `and(assigned_at.gte.${startToday},last_contact_at.gte.${startToday})`
+    )
     .order("next_followup_at", { ascending: true })
     .limit(300);
 
@@ -163,11 +180,16 @@ export async function getTodayStats(me: Me) {
     vipTransfers: rows.filter(
       (e) => e.event_type === "status_change" && e.to_status === "VIP Transferred"
     ).length,
-    ftds: rows.filter(
-      (e) =>
-        e.event_type === "status_change" &&
-        (e.to_status === "First Deposit" || e.to_status === "Active")
-    ).length,
+    // Reversals subtract, so a deposit logged by mistake and corrected stops
+    // counting instead of standing forever.
+    ftds: Math.max(
+      0,
+      rows.filter(
+        (e) =>
+          e.event_type === "status_change" &&
+          (e.to_status === "First Deposit" || e.to_status === "Active")
+      ).length - rows.filter((e) => e.event_type === "deposit_reversed").length
+    ),
   };
 }
 

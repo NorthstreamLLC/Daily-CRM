@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useFormState, useFormStatus } from "react-dom";
 import { setNewPassword, type ResetState } from "./actions";
 import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Mark } from "@/components/Brand";
 
 function Submit() {
   const { pending } = useFormStatus();
@@ -27,6 +28,9 @@ export default function ResetPasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-canvas px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-7 text-center">
+          <span className="mx-auto mb-4 flex w-fit">
+            <Mark size={44} rounded="xl" />
+          </span>
           <h1 className="text-h1 font-semibold tracking-tight text-ink">
             Choose a new password
           </h1>

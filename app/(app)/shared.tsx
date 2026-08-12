@@ -1,41 +1,73 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { Player } from "@/lib/queries";
 import { Badge, Select, Textarea, Input, Button, cn } from "@/components/ui";
 import { AlertTriangle, Check, MessageSquare, History, X } from "@/components/icons";
-import { changeStatus, updatePlayerField } from "./actions";
+import {
+  changeStatus,
+  refreshPlayerWager,
+  reverseFirstDeposit,
+  updatePlayerField,
+} from "./actions";
 import { formatDate, formatDateTime, relativeDays } from "@/lib/time";
 
 export type StatusOption = { name: string };
 
 /* ------------------------------------------------------------ Status select */
 
+/** Colour by stage, so a long book can be scanned without reading every word. */
+const STATUS_TONE: Record<string, string> = {
+  "Initial Contact": "border-line-strong",
+  "VIP Transferred": "border-accent/50 bg-accent-soft/50 text-accent",
+  "First Deposit": "border-success/40 bg-success-soft/60 text-success",
+  Active: "border-success/40 bg-success-soft/60 text-success",
+  "Reactivation Queue": "border-warning/40 bg-warning-soft/60 text-warning",
+  "Potential Lead": "border-line-strong",
+  "Dead Lead": "border-line-strong bg-sunken text-ink-subtle",
+};
+
 export function StatusSelect({
   player,
   statuses,
   size = "md",
+  disabled = false,
   onChanged,
 }: {
   player: Player;
   statuses: StatusOption[];
   size?: "sm" | "md";
+  disabled?: boolean;
   onChanged?: (status: string) => void;
 }) {
   const [pending, start] = useTransition();
   const [value, setValue] = useState(player.status);
+  const router = useRouter();
+
+  // The server may have changed it (the wager sync moves players to Active),
+  // so follow the incoming value rather than trusting local state forever.
+  useEffect(() => setValue(player.status), [player.status]);
 
   return (
     <Select
       value={value}
-      disabled={pending}
+      disabled={pending || disabled}
       aria-label={`Status for ${player.handle}`}
-      className={cn(size === "sm" && "h-8 text-small", "min-w-0")}
+      className={cn(
+        size === "sm" && "h-8 text-small",
+        "min-w-0 font-medium",
+        STATUS_TONE[value] ?? "border-line-strong"
+      )}
       onChange={(e) => {
         const next = e.target.value;
         setValue(next); // reflect the choice immediately; the refresh confirms it
         start(async () => {
           await changeStatus(player.id, next);
+          /* Without this the row updates but the stat cards, the queue and the
+             calendar keep yesterday's numbers until a manual reload - the page
+             quietly disagreeing with itself. */
+          router.refresh();
           onChanged?.(next);
         });
       }}
@@ -104,6 +136,8 @@ export function AutoSaveField({
   const [value, setValue] = useState(initial);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const lastSaved = useRef(initial);
 
@@ -124,6 +158,11 @@ export function AutoSaveField({
         setError(null);
         lastSaved.current = value;
         setSaved(true);
+        // Saving a Roobet username reports what it matched on the codes.
+        setWarning(res?.warning ?? null);
+        setNote(
+          res?.message && res.message !== "Saved." ? res.message.replace(/^Saved\.\s*/, "") : null
+        );
       }
     });
   }
@@ -161,8 +200,22 @@ export function AutoSaveField({
           }
         }}
       />
-      {hint && !error && <p className="mt-1 text-caption text-ink-subtle">{hint}</p>}
+      {hint && !error && !note && !warning && (
+        <p className="mt-1 text-caption text-ink-subtle">{hint}</p>
+      )}
       {error && <p className="mt-1 text-caption text-danger">{error}</p>}
+      {note && (
+        <p className="mt-1 inline-flex items-start gap-1 text-caption font-medium text-success">
+          <Check size={11} className="mt-0.5 shrink-0" />
+          {note}
+        </p>
+      )}
+      {warning && (
+        <p className="mt-1 inline-flex items-start gap-1 text-caption text-warning">
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+          {warning}
+        </p>
+      )}
     </div>
   );
 }
@@ -267,7 +320,7 @@ export function PlayerDetail({
               placeholder="What was said, what they need, anything worth remembering."
             />
           </div>
-          <dl className="sm:col-span-2 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-3 text-small sm:grid-cols-4">
+          <dl className="sm:col-span-2 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-3 text-small sm:grid-cols-5">
             <Meta label="Reference" value={player.reference} />
             <Meta label="Source" value={player.source ?? "—"} />
             <Meta label="Added" value={formatDate(player.assigned_at, timezone)} />
@@ -275,7 +328,21 @@ export function PlayerDetail({
               label="Attempts"
               value={player.followup_attempts ? String(player.followup_attempts) : "0"}
             />
+            <Meta
+              label="Wagered"
+              value={
+                player.weighted_wager && Number(player.weighted_wager) > 0
+                  ? `$${Number(player.weighted_wager).toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}`
+                  : "—"
+              }
+            />
           </dl>
+
+          <div className="sm:col-span-2">
+            <PlayerCorrections player={player} />
+          </div>
         </div>
       ) : (
         <div className="p-4">
@@ -315,6 +382,82 @@ export function PlayerDetail({
             </ol>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Two corrections that need a deliberate action rather than a side effect.
+ *
+ * Re-checking wager matters after a backfill - the ledger gains history the
+ * player does not have yet. Reversing a deposit matters because the stamp is
+ * permanent by design, so undoing a mistake has to be explicit.
+ */
+function PlayerCorrections({ player }: { player: Player }) {
+  const [pending, start] = useTransition();
+  const [result, setResult] = useState<{ message?: string; warning?: string; error?: string } | null>(
+    null
+  );
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <div className="border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {player.roobet_username?.trim() && (
+          <Button
+            size="sm"
+            loading={pending}
+            onClick={() =>
+              start(async () => setResult(await refreshPlayerWager(player.id)))
+            }
+          >
+            Re-check wager
+          </Button>
+        )}
+
+        {player.first_deposit_at &&
+          (confirming ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="text-caption text-ink-muted">
+                Remove this deposit from the numbers?
+              </span>
+              <Button
+                size="sm"
+                variant="danger"
+                loading={pending}
+                onClick={() =>
+                  start(async () => {
+                    setResult(await reverseFirstDeposit(player.id));
+                    setConfirming(false);
+                  })
+                }
+              >
+                Yes, it was a mistake
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+            </span>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+              Not actually a deposit
+            </Button>
+          ))}
+      </div>
+
+      {result?.message && (
+        <p className="mt-2 inline-flex items-center gap-1 text-caption text-success">
+          <Check size={11} /> {result.message}
+        </p>
+      )}
+      {result?.warning && (
+        <p className="mt-2 inline-flex items-center gap-1 text-caption text-warning">
+          <AlertTriangle size={11} /> {result.warning}
+        </p>
+      )}
+      {result?.error && (
+        <p className="mt-2 text-caption text-danger">{result.error}</p>
       )}
     </div>
   );

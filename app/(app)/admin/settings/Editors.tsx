@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { FunnelStage, LookupRow, Setting } from "@/lib/admin";
 import { Badge, Button, Input, Notice, Select, cn } from "@/components/ui";
 import { Check, Plus } from "@/components/icons";
@@ -12,11 +13,19 @@ export function SettingRow({ setting }: { setting: Setting }) {
   const [value, setValue] = useState(setting.value);
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ error?: string; message?: string } | null>(null);
+  const router = useRouter();
 
   const dirty = value !== setting.value;
 
   function save() {
-    start(async () => setResult(await updateSetting(setting.key, value)));
+    start(async () => {
+      const res = await updateSetting(setting.key, value);
+      setResult(res);
+      /* Without this the value is stored but the page keeps rendering the old
+         one, so the button never leaves "Save" and every screen reading the
+         setting shows the previous value. */
+      if (!res?.error) router.refresh();
+    });
   }
 
   return (
@@ -90,6 +99,7 @@ export function StageRow({ stage }: { stage: FunnelStage }) {
   const [action, setAction] = useState(stage.next_action);
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ error?: string; message?: string } | null>(null);
+  const router = useRouter();
 
   const dirty = days !== String(stage.followup_days) || action !== stage.next_action;
 
@@ -145,14 +155,14 @@ export function StageRow({ stage }: { stage: FunnelStage }) {
           disabled={!dirty}
           loading={pending}
           onClick={() =>
-            start(async () =>
-              setResult(
-                await updateStage(stage.name, {
-                  followup_days: Number(days),
-                  next_action: action.trim(),
-                })
-              )
-            )
+            start(async () => {
+              const res = await updateStage(stage.name, {
+                followup_days: Number(days),
+                next_action: action.trim(),
+              });
+              setResult(res);
+              if (!res?.error) router.refresh();
+            })
           }
         >
           {dirty ? "Save" : "Saved"}
