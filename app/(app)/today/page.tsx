@@ -348,23 +348,39 @@ export default async function TodayPage({
 
       {/* Falling away. Above Coming up on purpose - a whale who stopped
           wagering outranks a routine follow-up scheduled for Thursday. */}
-      {(churn.quiet.length > 0 || churn.dropping.length > 0) && (
+      {(churn.quiet.length > 0 || churn.dropping.length > 0 || churn.watched.length > 0) && (
         <section className="mb-7">
           <GroupHeader
             title="Falling away"
-            count={churn.quiet.length + churn.dropping.length}
-            hint={`wagering dropped over the last ${churn.windowDays} days`}
+            count={churn.quiet.length + churn.dropping.length + churn.watched.length}
+            hint={churn.basisLabel}
             tone="danger"
           />
           <div className="space-y-1.5">
+            {churn.watched.length > 0 && (
+              <ChurnList
+                players={churn.watched}
+                kind="watched"
+                windowDays={churn.windowDays}
+                allowWatch
+                limit={10}
+              />
+            )}
             {churn.quiet.length > 0 && (
-              <ChurnList players={churn.quiet} kind="quiet" windowDays={churn.windowDays} limit={8} />
+              <ChurnList
+                players={churn.quiet}
+                kind="quiet"
+                windowDays={churn.windowDays}
+                allowWatch
+                limit={8}
+              />
             )}
             {churn.dropping.length > 0 && (
               <ChurnList
                 players={churn.dropping}
                 kind="dropping"
                 windowDays={churn.windowDays}
+                allowWatch
                 limit={5}
               />
             )}

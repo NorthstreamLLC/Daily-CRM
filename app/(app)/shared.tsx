@@ -9,6 +9,7 @@ import {
   changeStatus,
   refreshPlayerWager,
   reverseFirstDeposit,
+  setVipWatch,
   updatePlayerField,
 } from "./actions";
 import { formatDate, formatDateTime, relativeDays } from "@/lib/time";
@@ -400,10 +401,32 @@ function PlayerCorrections({ player }: { player: Player }) {
     null
   );
   const [confirming, setConfirming] = useState(false);
+  const [watching, setWatching] = useState(false);
+  const router = useRouter();
 
   return (
     <div className="border-t border-line pt-3">
       <div className="flex flex-wrap items-center gap-2">
+        {/* Any player can be watched, not only ones detection has flagged -
+            that is the whole point of a manual list. */}
+        <Button
+          size="sm"
+          loading={pending}
+          onClick={() =>
+            start(async () => {
+              const next = !watching;
+              const res = await setVipWatch(player.id, next);
+              setResult(res);
+              if (!res.error) {
+                setWatching(next);
+                router.refresh();
+              }
+            })
+          }
+        >
+          {watching ? "Stop watching" : "Watch for drop-off"}
+        </Button>
+
         {player.roobet_username?.trim() && (
           <Button
             size="sm"

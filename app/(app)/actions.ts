@@ -648,3 +648,63 @@ export async function addPlayer(
 
   return { message: `Added ${created.reference} — ${handle}. ${note}` };
 }
+
+
+/* --------------------------------------------------------- VIP watch list */
+
+/**
+ * Pin a player to the fallen-away list, or take them off it.
+ *
+ * Detection catches the obvious slides. It cannot know a whale said something
+ * worrying on a call, which is why a person can put someone on the list
+ * directly - and why a pinned player stays until someone takes them off,
+ * rather than being silently re-evaluated each night.
+ *
+ * Row Level Security decides who may pin whom: a rep their own players, an
+ * admin anyone's.
+ */
+export async function setVipWatch(
+  playerId: string,
+  watching: boolean,
+  note?: string
+): Promise<{ error?: string; message?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+
+  if (!watching) {
+    /* Resolved rather than deleted - "we watched them and they came back" is
+       worth keeping. */
+    const { error } = await supabase
+      .from("vip_watch")
+      .update({ resolved_at: new Date().toISOString() })
+      .eq("player_id", playerId)
+      .is("resolved_at", null);
+
+    if (error) return { error: watchError(error.message) };
+    refresh();
+    return { message: "Off the watch list." };
+  }
+
+  const { error } = await supabase.from("vip_watch").upsert(
+    {
+      player_id: playerId,
+      added_by: me.id,
+      added_at: new Date().toISOString(),
+      note: note?.trim() || null,
+      resolved_at: null,
+    },
+    { onConflict: "player_id" }
+  );
+
+  if (error) return { error: watchError(error.message) };
+  refresh();
+  return { message: "Added to the watch list." };
+}
+
+function watchError(message: string) {
+  return /does not exist|schema cache/i.test(message)
+    ? "Run migration 20260812000020_vip_watch.sql first."
+    : message;
+}

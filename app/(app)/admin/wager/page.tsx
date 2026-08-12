@@ -328,7 +328,7 @@ export default async function WagerPage({
               count={churn.quiet.length + churn.dropping.length}
               hint={`Players wagering below their own recent normal, comparing the last ${churn.windowDays} days with the ${churn.windowDays} before. ${money(
                 churn.atRisk
-              )} of wager at risk.`}
+              )} of wager at risk. Comparing ${churn.basisLabel}.`}
               action={
                 <Link
                   href="/admin/settings"
@@ -338,6 +338,25 @@ export default async function WagerPage({
                 </Link>
               }
             />
+
+            {churn.watched.length > 0 && (
+              <div className="mb-4">
+                <p className="mb-2 text-small font-semibold text-ink">
+                  Watched by a rep
+                  <span className="tabular ml-2 font-normal text-accent">
+                    {churn.watched.length}
+                  </span>
+                </p>
+                <ChurnList
+                  players={churn.watched}
+                  kind="watched"
+                  windowDays={churn.windowDays}
+                  showOwner
+                  allowWatch
+                  limit={20}
+                />
+              </div>
+            )}
 
             {churn.quiet.length === 0 && churn.dropping.length === 0 ? (
               <EmptyState
@@ -359,6 +378,7 @@ export default async function WagerPage({
                     kind="quiet"
                     windowDays={churn.windowDays}
                     showOwner
+                    allowWatch
                     limit={10}
                   />
                 </div>
@@ -374,6 +394,7 @@ export default async function WagerPage({
                     kind="dropping"
                     windowDays={churn.windowDays}
                     showOwner
+                    allowWatch
                     limit={10}
                   />
                 </div>
