@@ -239,7 +239,7 @@ export function BookTable({
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 z-10">
             <tr className="border-b-2 border-line-heavy bg-sunken">
-              <th scope="col" className="w-11 px-3 py-2.5">
+              <th scope="col" className="w-11 px-3 py-2">
                 {!readOnly && (
                   <Checkbox
                     checked={allOnPageSelected}
@@ -253,7 +253,7 @@ export function BookTable({
                   key={col.label}
                   scope="col"
                   className={cn(
-                    "px-3 py-2.5 text-label font-medium uppercase tracking-wide text-ink-subtle",
+                    "px-3 py-2 text-label font-medium uppercase tracking-wide text-ink-subtle",
                     col.align === "right" && "text-right",
                     col.className
                   )}
@@ -283,7 +283,7 @@ export function BookTable({
                   )}
                 </th>
               ))}
-              <th scope="col" className="w-14 px-3 py-2.5" />
+              <th scope="col" className="w-14 px-3 py-2" />
             </tr>
           </thead>
 
@@ -301,7 +301,7 @@ export function BookTable({
                 <Fragment key={p.id}>
                   <tr
                     className={cn(
-                      "border-b border-line transition-colors duration-fast",
+                      "border-b border-line-heavy transition-colors duration-fast",
                       selected.has(p.id)
                         ? "bg-accent-soft/60"
                         : isOpen
@@ -315,7 +315,7 @@ export function BookTable({
                       veryLate && !selected.has(p.id) && "border-l-2 border-l-danger"
                     )}
                   >
-                    <td className="px-3 py-3 align-middle">
+                    <td className="px-3 py-1.5 align-middle">
                       {!readOnly && (
                         <Checkbox
                           checked={selected.has(p.id)}
@@ -326,7 +326,7 @@ export function BookTable({
                     </td>
 
                     {/* Identity carries the reference and source quietly beneath */}
-                    <td className="px-3 py-2.5 align-middle">
+                    <td className="px-3 py-1.5 align-middle">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium text-ink">{p.handle}</span>
                         {readyForDead && (
@@ -342,7 +342,7 @@ export function BookTable({
                       </p>
                     </td>
 
-                    <td className="px-3 py-3 align-middle">
+                    <td className="px-3 py-1.5 align-middle">
                       {p.roobet_username ? (
                         <span className="truncate text-small text-ink">{p.roobet_username}</span>
                       ) : (
@@ -356,7 +356,7 @@ export function BookTable({
                       )}
                     </td>
 
-                    <td className="px-3 py-3 align-middle">
+                    <td className="px-3 py-1.5 align-middle">
                       <StatusSelect
                         player={p}
                         statuses={statuses}
@@ -367,7 +367,7 @@ export function BookTable({
 
                     <td
                       className={cn(
-                        "tabular px-3 py-3 text-right align-middle text-small",
+                        "tabular px-3 py-1.5 text-right align-middle text-small",
                         Number(p.weighted_wager ?? 0) > 0
                           ? "font-medium text-ink"
                           : "text-ink-subtle"
@@ -378,7 +378,7 @@ export function BookTable({
                         : "—"}
                     </td>
 
-                    <td className="tabular px-3 py-3 text-right align-middle text-small text-ink-muted">
+                    <td className="tabular px-3 py-1.5 text-right align-middle text-small text-ink-muted">
                       {formatDate(p.last_contact_at, timezone)}
                     </td>
 

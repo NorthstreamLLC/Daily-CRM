@@ -7,7 +7,10 @@
  */
 
 export const PAGE_SIZES = [25, 50, 100, 200] as const;
-export const DEFAULT_PAGE_SIZE = 50;
+/* 100, because a real book is 200-300 players. At 50 a rep pages three times
+   to see their own book, which is how a list stops being scanned and starts
+   being avoided. */
+export const DEFAULT_PAGE_SIZE = 100;
 
 /** Only ever a size we offer - a hand-edited URL cannot ask for 100,000 rows. */
 export function resolvePageSize(value: string | undefined): number {

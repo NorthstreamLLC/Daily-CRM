@@ -28,6 +28,7 @@ export function TaskRow({
   overdueHours,
   dayStartMs,
   showComplete = true,
+  striped = false,
 }: {
   player: Player;
   statuses: StatusOption[];
@@ -37,6 +38,8 @@ export function TaskRow({
   /** Midnight this morning in the viewer's zone, for the "added today" tag. */
   dayStartMs: number;
   showComplete?: boolean;
+  /** Alternating background, so a long list stays readable across columns. */
+  striped?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -67,11 +70,12 @@ export function TaskRow({
     return (
       <div
         role="status"
-        className="flex items-center gap-3 rounded-card border border-line-heavy bg-surface
-                   px-4 py-2.5 text-small text-ink-muted"
+        className="flex items-center gap-3 border-b border-line-heavy bg-success-soft/30
+                   px-3 py-1.5 text-small text-ink-muted last:border-0"
       >
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-success-soft text-success">
-          <Check size={12} />
+        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full
+                         bg-success text-white">
+          <Check size={11} />
         </span>
         <span>
           <span className="font-medium text-ink">{player.handle}</span> logged for today.
@@ -95,19 +99,26 @@ export function TaskRow({
   }
 
   return (
+    /* A row in a list, not a card in a stack.
+    
+       At 300 players a rep scrolls this all day, and card padding that reads
+       as generous at ten rows reads as wading at three hundred. Borders and
+       zebra striping do the separating instead of whitespace - the same reason
+       a spreadsheet looks like a spreadsheet. */
     <div
       className={cn(
-        "overflow-hidden rounded-card border bg-surface transition-colors duration-fast",
-        open ? "border-accent/60" : "border-line-heavy hover:border-ink-subtle"
+        "border-b border-line-heavy bg-surface transition-colors duration-fast last:border-0",
+        open ? "bg-accent-soft/30" : "hover:bg-sunken/60",
+        striped && !open && "bg-sunken/35"
       )}
     >
       <div
         className={cn(
-          "grid gap-x-4 gap-y-2 px-3 py-3 sm:px-4",
+          "grid gap-x-3 gap-y-1 px-3 py-1.5",
           // Phone: the tick, then everything stacked beside it.
           "grid-cols-[auto_minmax(0,1fr)]",
           // Desktop: name, what to do, last contact, status, notes.
-          "lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.15fr)_96px_180px_auto] lg:items-center"
+          "lg:grid-cols-[auto_minmax(0,1.1fr)_minmax(0,1.3fr)_84px_170px_auto] lg:items-center"
         )}
       >
         {showComplete ? (
@@ -117,15 +128,15 @@ export function TaskRow({
             disabled={pending}
             aria-label={`Log contact with ${player.handle}`}
             title="Log that you've contacted them"
-            className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md
+            className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded
                        border-2 border-line-strong text-transparent transition-colors
                        duration-fast hover:border-accent hover:bg-accent-soft
                        hover:text-accent disabled:opacity-40"
           >
-            <Check size={14} />
+            <Check size={13} />
           </button>
         ) : (
-          <span className="h-[26px] w-[26px] shrink-0" aria-hidden="true" />
+          <span className="h-[22px] w-[22px] shrink-0" aria-hidden="true" />
         )}
 
         {/* Identity. Reference, source and due date sit quietly underneath. */}
@@ -179,7 +190,7 @@ export function TaskRow({
               open ? `Hide details for ${player.handle}` : `Notes and details for ${player.handle}`
             }
             className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control",
+              "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control",
               "transition-colors duration-fast",
               open
                 ? "bg-accent text-white btn-on-accent"
@@ -188,7 +199,7 @@ export function TaskRow({
                 : "text-ink-subtle hover:bg-sunken hover:text-ink"
             )}
           >
-            {player.notes ? <MessageSquare size={15} /> : <ChevronDown size={15} />}
+            {player.notes ? <MessageSquare size={14} /> : <ChevronDown size={14} />}
           </button>
         </div>
 

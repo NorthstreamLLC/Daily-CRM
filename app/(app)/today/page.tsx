@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { TaskRow } from "./TaskRow";
 import { AddPlayer } from "./AddPlayer";
 import { ViewAs } from "../ViewAs";
+import { TodayTabs } from "./TodayTabs";
 import { createClient } from "@/lib/supabase/server";
 import { EmptyState, cn } from "@/components/ui";
 import {
@@ -10,7 +11,6 @@ import {
   CalendarCheck,
   Check,
   Clock,
-  Inbox,
   TrendingUp,
   UserCheck,
   Wallet,
@@ -20,7 +20,6 @@ import {
   getDueNow,
   getComingUp,
   countDeadLeads,
-  getDeadLeads,
   getTodayStats,
   getTargets,
   getStatuses,
@@ -92,6 +91,52 @@ function StatCard({
 }
 
 /* ------------------------------------------------------------ Group header */
+
+/**
+ * A heading that sits inside the list rather than above it.
+ *
+ * GroupHeader puts a title over a stack of cards. This is a rule across a
+ * continuous sheet - the same job a frozen header row does in a spreadsheet,
+ * which is what a rep working three hundred rows expects.
+ */
+function ListHeading({
+  title,
+  count,
+  hint,
+  tone = "neutral",
+}: {
+  title: string;
+  count: number;
+  hint?: string;
+  tone?: "neutral" | "accent" | "danger";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-2 border-b-2 border-line-heavy px-3 py-1.5",
+        tone === "danger" ? "bg-danger-soft" : "bg-sunken"
+      )}
+    >
+      <span
+        className={cn(
+          "text-label font-semibold uppercase tracking-wide",
+          tone === "danger" ? "text-danger" : tone === "accent" ? "text-accent" : "text-ink-muted"
+        )}
+      >
+        {title}
+      </span>
+      <span
+        className={cn(
+          "tabular rounded px-1.5 text-caption font-semibold",
+          tone === "danger" ? "bg-danger text-white" : "bg-line-strong/50 text-ink"
+        )}
+      >
+        {count}
+      </span>
+      {hint && <span className="text-caption text-ink-subtle">{hint}</span>}
+    </div>
+  );
+}
 
 function GroupHeader({
   title,
@@ -169,12 +214,14 @@ export default async function TodayPage({
 
   const supabase = createClient();
 
-  const [dueNow, comingUp, deadLeads, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
+  const [dueNow, comingUp, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
       getDueNow(me, ownerId),
       getComingUp(me, comingUpDays, ownerId),
-      // Today shows a few and links to the Book for the rest.
-      getDeadLeads(me, ownerId, 12),
+      /* Dead leads are not today's work - they are a standing list, and at
+         300 players they buried the rows that actually need doing. They live
+         in the Book now, one filter click away. Only the count is kept, for
+         the link. */
       countDeadLeads(me, ownerId),
       getTodayStats(me, ownerId),
       getTargets(me, ownerId),
@@ -214,6 +261,8 @@ export default async function TodayPage({
     if (late) overdue.push(p);
     else dueToday.push(p);
   }
+
+  const tab = one2("tab") === "coming" ? ("coming" as const) : ("work" as const);
 
   const rowProps = {
     statuses,
@@ -348,158 +397,138 @@ export default async function TodayPage({
         </div>
       </section>
 
-      {/* Overdue */}
-      {overdue.length > 0 && (
-        <section className="mb-7">
-          <GroupHeader
-            title="Overdue"
-            count={overdue.length}
-            hint="due before today"
-            tone="danger"
-          />
-          <div className="space-y-1.5">
-            {overdue.map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} />
-            ))}
-          </div>
-        </section>
-      )}
+      <TodayTabs
+        current={tab}
+        workCount={dueNow.length}
+        comingCount={comingUp.length}
+      />
 
-      {/* Due today */}
-      {dueToday.length > 0 && (
-        <section className="mb-7">
-          <GroupHeader title="Due today" count={dueToday.length} tone="accent" />
-          <div className="space-y-1.5">
-            {dueToday.map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} />
-            ))}
-          </div>
-        </section>
-      )}
+      {tab === "work" ? (
+        <>
+          {/* Overdue and due today, in one continuous list.
+              Two headings, one bordered container - so the eye reads it as a
+              single sheet with a rule through it rather than two stacks. */}
+          {clear ? (
+            <EmptyState
+              icon={<CalendarCheck size={18} />}
+              title="Nothing due today"
+              body="Everyone in your book has been contacted recently. Add a player, or work ahead from Coming up."
+            />
+          ) : (
+            <div className="overflow-hidden rounded-card border border-line-strong bg-surface shadow-card">
+              {overdue.length > 0 && (
+                <>
+                  <ListHeading
+                    title="Overdue"
+                    count={overdue.length}
+                    hint="due before today"
+                    tone="danger"
+                  />
+                  {overdue.map((p, i) => (
+                    <TaskRow key={p.id} player={p} {...rowProps} striped={i % 2 === 1} />
+                  ))}
+                </>
+              )}
 
-      {clear && (
-        <section className="mb-8">
-          <EmptyState
-            icon={<CalendarCheck size={18} />}
-            title="Nothing due today"
-            body="Everyone in your book has been contacted recently. Add a player, or work ahead from Coming up."
-          />
-        </section>
-      )}
+              {dueToday.length > 0 && (
+                <>
+                  <ListHeading title="Due today" count={dueToday.length} tone="accent" />
+                  {dueToday.map((p, i) => (
+                    <TaskRow key={p.id} player={p} {...rowProps} striped={i % 2 === 1} />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
 
-      {/* Falling away. Above Coming up on purpose - a whale who stopped
-          wagering outranks a routine follow-up scheduled for Thursday. */}
-      {(churn.quiet.length > 0 || churn.dropping.length > 0 || churn.watched.length > 0) && (
-        <section className="mb-7">
-          <GroupHeader
-            title="Falling away"
-            count={churn.quiet.length + churn.dropping.length + churn.watched.length}
-            hint={churn.basisLabel}
-            tone="danger"
-          />
-          <div className="space-y-1.5">
-            {churn.watched.length > 0 && (
-              <ChurnList
-                players={churn.watched}
-                kind="watched"
-                windowDays={churn.windowDays}
-                allowWatch
-                limit={10}
+          {/* Falling away - a whale who stopped wagering outranks a routine
+              follow-up, so it stays on the working view. */}
+          {(churn.quiet.length > 0 || churn.dropping.length > 0 || churn.watched.length > 0) && (
+            <section className="mt-7">
+              <GroupHeader
+                title="Falling away"
+                count={churn.quiet.length + churn.dropping.length + churn.watched.length}
+                hint={churn.basisLabel}
+                tone="danger"
               />
-            )}
-            {churn.quiet.length > 0 && (
-              <ChurnList
-                players={churn.quiet}
-                kind="quiet"
-                windowDays={churn.windowDays}
-                allowWatch
-                limit={8}
+              <div className="space-y-1.5">
+                {churn.watched.length > 0 && (
+                  <ChurnList
+                    players={churn.watched}
+                    kind="watched"
+                    windowDays={churn.windowDays}
+                    allowWatch
+                    limit={10}
+                  />
+                )}
+                {churn.quiet.length > 0 && (
+                  <ChurnList
+                    players={churn.quiet}
+                    kind="quiet"
+                    windowDays={churn.windowDays}
+                    allowWatch
+                    limit={8}
+                  />
+                )}
+                {churn.dropping.length > 0 && (
+                  <ChurnList
+                    players={churn.dropping}
+                    kind="dropping"
+                    windowDays={churn.windowDays}
+                    allowWatch
+                    limit={5}
+                  />
+                )}
+              </div>
+            </section>
+          )}
+        </>
+      ) : (
+        /* Coming up: the schedule. Nothing here is actionable yet, so there is
+           no tick box - the row is for reading, and for opening notes. */
+        <>
+          {comingUp.length === 0 ? (
+            <EmptyState
+              icon={<Clock size={18} />}
+              title="Nothing scheduled in the next few days"
+              body={`Follow-ups appear here once someone's next contact date falls inside the next ${comingUpDays} days.`}
+            />
+          ) : (
+            <div className="overflow-hidden rounded-card border border-line-strong bg-surface shadow-card">
+              <ListHeading
+                title={`Next ${comingUpDays} days`}
+                count={comingUp.length}
+                hint="nothing to do yet"
               />
-            )}
-            {churn.dropping.length > 0 && (
-              <ChurnList
-                players={churn.dropping}
-                kind="dropping"
-                windowDays={churn.windowDays}
-                allowWatch
-                limit={5}
-              />
-            )}
-          </div>
-        </section>
+              {comingUp.map((p, i) => (
+                <TaskRow
+                  key={p.id}
+                  player={p}
+                  {...rowProps}
+                  showComplete={false}
+                  striped={i % 2 === 1}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {/* Coming up - always present, so its absence is never taken for a bug */}
-      <section className="mb-7">
-        <GroupHeader
-          title="Coming up"
-          count={comingUp.length}
-          hint={`next ${comingUpDays} days — nothing to do yet`}
-        />
-        {comingUp.length === 0 ? (
-          <EmptyState
-            icon={<Clock size={18} />}
-            title="Nothing scheduled in the next few days"
-            body="Follow-ups appear here once someone's next contact date falls inside the window."
-          />
-        ) : (
-          <div className="space-y-1.5 opacity-90">
-            {comingUp.slice(0, 20).map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} showComplete={false} />
-            ))}
-            {comingUp.length > 20 && (
-              <p className="pt-1 text-small text-ink-muted">
-                Showing 20 of {comingUp.length}.{" "}
-                <Link href="/book" className="font-medium text-accent hover:underline">
-                  See the rest in Book
-                </Link>
-                .
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      {/* Dead leads live in the Book now. A line, not a list. */}
+      {deadTotal > 0 && (
+        <p className="mt-6 text-small text-ink-muted">
+          <span className="tabular font-medium text-ink">{deadTotal}</span> dead{" "}
+          {deadTotal === 1 ? "lead" : "leads"} waiting for a retarget.{" "}
+          <Link
+            href="/book?flag=dead"
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Work them in the Book
+          </Link>
+          .
+        </p>
+      )}
 
-      {/* Dead leads */}
-      <section>
-        <GroupHeader
-          title="Dead leads"
-          count={deadTotal}
-          hint="soonest retarget first — they rejoin the queue when their 30 days is up"
-          action={
-            deadLeads.length > 0 ? (
-              <Link
-                href="/book?flag=dead"
-                className="text-small font-medium text-accent underline-offset-2 hover:underline"
-              >
-                See all in Book
-              </Link>
-            ) : undefined
-          }
-        />
-        {deadLeads.length === 0 ? (
-          <EmptyState
-            icon={<Inbox size={18} />}
-            title="No dead leads"
-            body="Nobody has been marked Dead Lead yet. When someone stops responding, set their status and they'll wait here for a retarget."
-          />
-        ) : (
-          <div className="space-y-1.5">
-            {deadLeads.map((p) => (
-              <TaskRow key={p.id} player={p} {...rowProps} showComplete={false} />
-            ))}
-            {deadTotal > deadLeads.length && (
-              <p className="pt-1 text-small text-ink-muted">
-                Showing {deadLeads.length} of {deadTotal}.{" "}
-                <Link href="/book?flag=dead" className="font-medium text-accent hover:underline">
-                  See the rest in Book
-                </Link>
-                .
-              </p>
-            )}
-          </div>
-        )}
-      </section>
 
       <p className="mt-10 text-caption text-ink-subtle">
         Times shown in {me.timezone.replace("_", " ")} — your own time zone decides what

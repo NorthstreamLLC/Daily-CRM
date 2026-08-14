@@ -69,7 +69,7 @@ export function BookToolbar({
   const hasFilters = Boolean(q || activeFlag || activeStatus || activeSource);
 
   return (
-    <div className="mb-4 space-y-2.5">
+    <div className="mb-3 space-y-2">
       {/* Quick filters double as a health check on the book. */}
       <div className="flex flex-wrap items-center gap-1.5">
         {chips.map((chip) => {
@@ -103,7 +103,9 @@ export function BookToolbar({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[220px] flex-1">
+        {/* Capped, so the selects sit beside it instead of being pushed onto
+            their own rows - which is what made the toolbar four rows tall. */}
+        <div className="relative min-w-[200px] max-w-[320px] flex-1">
           <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-subtle">
             <Search size={15} />
           </span>
@@ -130,7 +132,7 @@ export function BookToolbar({
           value={activeStatus}
           aria-label="Filter by status"
           onChange={(e) => apply({ status: e.target.value || null })}
-          className="w-auto min-w-[148px]"
+          className="w-auto min-w-[132px]"
         >
           <option value="">All statuses</option>
           {statuses.map((s) => (
@@ -144,7 +146,7 @@ export function BookToolbar({
           value={activeSource}
           aria-label="Filter by source"
           onChange={(e) => apply({ source: e.target.value || null })}
-          className="w-auto min-w-[128px]"
+          className="w-auto min-w-[116px]"
         >
           <option value="">All sources</option>
           {sources.map((s) => (
