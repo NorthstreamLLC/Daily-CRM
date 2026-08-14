@@ -866,3 +866,128 @@ export async function getTemplates(): Promise<{ id: string; name: string; body: 
   if (error) return [];
   return (data ?? []) as { id: string; name: string; body: string }[];
 }
+
+
+/* ----------------------------------------------------------- Bulk add */
+
+export type BulkAddResult = {
+  error?: string;
+  message?: string;
+  added: string[];
+  duplicates: { handle: string; where: string }[];
+};
+
+/**
+ * Paste a list of handles, get a list of players.
+ *
+ * A rep pulling twenty names out of a Discord thread was filling in the same
+ * form twenty times, changing one field each pass. Source and status are the
+ * same for the whole batch by definition - they came from the same place at
+ * the same time - so they are asked once.
+ *
+ * Duplicates are reported rather than skipped silently, because "I pasted 20
+ * and got 17" needs an answer, and the answer is usually "you already have
+ * these three".
+ */
+export async function bulkAddPlayers(
+  raw: string,
+  source: string,
+  status: string,
+  contacted: boolean
+): Promise<BulkAddResult> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in.", added: [], duplicates: [] };
+
+  /* One per line, but commas and tabs are just as likely from a paste, and a
+     leading @ is how half of these get copied. */
+  const handles = Array.from(
+    new Set(
+      raw
+        .split(/[\n,\t]+/)
+        .map((h) => h.trim().replace(/^@/, ""))
+        .filter(Boolean)
+    )
+  );
+
+  if (handles.length === 0) {
+    return { error: "Nothing to add - paste some handles first.", added: [], duplicates: [] };
+  }
+  if (handles.length > 200) {
+    return {
+      error: `That is ${handles.length} handles. Add up to 200 at a time so a mistake stays small.`,
+      added: [],
+      duplicates: [],
+    };
+  }
+
+  const supabase = createClient();
+  const now = new Date().toISOString();
+
+  // Everything this rep already has, in one query rather than one per handle.
+  const { data: existing } = await supabase
+    .from("players")
+    .select("handle, reference, status")
+    .eq("owner_id", me.id)
+    .limit(100000);
+
+  const mine = new Map(
+    (existing ?? []).map((p) => [String(p.handle).toLowerCase(), p])
+  );
+
+  const duplicates: { handle: string; where: string }[] = [];
+  const toInsert: Record<string, unknown>[] = [];
+
+  for (const handle of handles) {
+    const hit = mine.get(handle.toLowerCase());
+    if (hit) {
+      duplicates.push({ handle, where: `already yours - ${hit.reference} (${hit.status})` });
+      continue;
+    }
+    toInsert.push({
+      owner_id: me.id,
+      handle,
+      source: source || null,
+      status,
+      assigned_at: now,
+      last_contact_at: contacted ? now : null,
+      vip_fasttrack_started_at: status === "VIP Transferred" ? now : null,
+      first_deposit_at: status === "First Deposit" || status === "Active" ? now : null,
+    });
+  }
+
+  if (toInsert.length === 0) {
+    return {
+      message: "Every one of those is already in your book.",
+      added: [],
+      duplicates,
+    };
+  }
+
+  const { data: created, error } = await supabase
+    .from("players")
+    .insert(toInsert)
+    .select("id, handle, reference");
+
+  if (error) return { error: error.message, added: [], duplicates };
+
+  // The stats read activity_log, so every player needs their event.
+  await supabase.from("activity_log").insert(
+    (created ?? []).map((c) => ({
+      player_id: c.id,
+      user_id: me.id,
+      event_type: "player_created",
+      to_status: status,
+      metadata: { via: "bulk" },
+    }))
+  );
+
+  refresh();
+
+  return {
+    message:
+      `Added ${created?.length ?? 0}` +
+      (duplicates.length ? `, skipped ${duplicates.length} you already had.` : "."),
+    added: (created ?? []).map((c) => `${c.reference} — ${c.handle}`),
+    duplicates,
+  };
+}

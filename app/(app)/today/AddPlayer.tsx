@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { addPlayer, type ActionState } from "../actions";
 import { Button, Card, Field, Input, Select, Textarea, Notice, cn } from "@/components/ui";
 import { Check, Plus, X } from "@/components/icons";
+import { AddModeTabs, BulkAdd } from "./BulkAdd";
 
 function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus();
@@ -43,6 +44,7 @@ export function AddPlayer({
   statuses: { name: string }[];
 }) {
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"one" | "many">("one");
   const [contacted, setContacted] = useState(true);
   const [state, formAction] = useFormState<ActionState, FormData>(addPlayer, null);
 
@@ -85,8 +87,24 @@ export function AddPlayer({
     );
   }
 
+  if (mode === "many") {
+    return (
+      <div>
+        <AddModeTabs mode={mode} onChange={setMode} />
+        <BulkAdd
+          sources={sources}
+          defaultSource={defaultSource}
+          statuses={statuses}
+          onClose={() => setOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
-    <Card className="mb-4">
+    <div>
+      <AddModeTabs mode={mode} onChange={setMode} />
+      <Card className="mb-4">
       <form ref={formRef} action={formAction}>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-h3 font-semibold text-ink">Add a player</h3>
@@ -201,7 +219,8 @@ export function AddPlayer({
           </div>
         )}
       </form>
-    </Card>
+      </Card>
+    </div>
   );
 }
 

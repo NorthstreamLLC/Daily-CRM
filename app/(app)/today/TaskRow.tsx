@@ -7,6 +7,7 @@ import { Badge, cn } from "@/components/ui";
 import { AlertTriangle, Check, ChevronDown, MessageSquare } from "@/components/icons";
 import { completeTask, undoCompleteTask } from "../actions";
 import { PlayerDetail, StatusSelect, formatDate, type StatusOption } from "../shared";
+import { CopyHandle, OpenProfile } from "../CopyHandle";
 import { relativeDays } from "@/lib/time";
 
 /**
@@ -142,7 +143,8 @@ export function TaskRow({
         {/* Identity. Reference, source and due date sit quietly underneath. */}
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate font-medium text-ink">{player.handle}</span>
+            <CopyHandle handle={player.handle} />
+            <OpenProfile handle={player.handle} source={player.source} />
             {addedToday && <Badge tone="accent">Added today</Badge>}
             {player.missing_roobet && (
               <Badge tone="warning">No username</Badge>

@@ -4,6 +4,7 @@ import { Fragment, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Player } from "@/lib/queries";
 import type { BookSort } from "@/lib/book";
+import { CopyHandle, OpenProfile } from "../CopyHandle";
 import { Badge, Button, Select, cn } from "@/components/ui";
 import {
   AlertTriangle,
@@ -328,7 +329,8 @@ export function BookTable({
                     {/* Identity carries the reference and source quietly beneath */}
                     <td className="px-3 py-1.5 align-middle">
                       <div className="flex items-center gap-2">
-                        <span className="truncate font-medium text-ink">{p.handle}</span>
+                        <CopyHandle handle={p.handle} />
+                        <OpenProfile handle={p.handle} source={p.source} />
                         {readyForDead && (
                           <Badge tone="danger" icon={<AlertTriangle size={10} />}>
                             {p.followup_attempts}
@@ -450,7 +452,7 @@ export function BookTable({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-medium text-ink">{p.handle}</span>
+                    <CopyHandle handle={p.handle} />
                     <span className="tabular text-caption text-ink-subtle">{p.reference}</span>
                   </div>
                   <p className="mt-0.5 text-caption text-ink-subtle">
