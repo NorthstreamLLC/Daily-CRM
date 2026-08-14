@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import { addPlayer, type ActionState } from "../actions";
 import { Button, Card, Field, Input, Select, Textarea, Notice, cn } from "@/components/ui";
 import { Check, Plus, X } from "@/components/icons";
@@ -48,6 +49,7 @@ export function AddPlayer({
   const formRef = useRef<HTMLFormElement>(null);
   const handleRef = useRef<HTMLInputElement>(null);
   const lastMessage = useRef<string | undefined>(undefined);
+  const router = useRouter();
 
   /**
    * Clear the form once a player is actually created.
@@ -62,7 +64,18 @@ export function AddPlayer({
     formRef.current?.reset();
     setContacted(true);
     handleRef.current?.focus();
-  }, [state?.message]);
+
+    /* The server revalidated, but this component submitted the form and
+       nothing told the surrounding server components to re-render. So the
+       player appeared in the queue on the next navigation while the Active
+       Leads counter above it still read the old number - the page
+       contradicting itself, which is worse than either number being wrong.
+    
+       Third time this has bitten in this codebase: the status dropdown and the
+       settings rows needed the same line. The rule is that revalidatePath
+       marks the cache stale, and router.refresh() is what actually re-renders. */
+    router.refresh();
+  }, [state?.message, router]);
 
   if (!open) {
     return (

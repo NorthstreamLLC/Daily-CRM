@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import { createUser, type AdminState } from "../actions";
 import { Button, Card, Field, Input, Select, Notice } from "@/components/ui";
 import { Plus, X } from "@/components/icons";
@@ -36,6 +37,16 @@ export function AddUser({
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState(suggestPassword);
   const [state, formAction] = useFormState<AdminState, FormData>(createUser, null);
+  const router = useRouter();
+  const lastMessage = useRef<string | undefined>(undefined);
+
+  /* A new rep has to appear in the list without a reload - otherwise the admin
+     assumes it failed and creates them twice. */
+  useEffect(() => {
+    if (!state?.message || state.message === lastMessage.current) return;
+    lastMessage.current = state.message;
+    router.refresh();
+  }, [state?.message, router]);
 
   if (!open) {
     return (

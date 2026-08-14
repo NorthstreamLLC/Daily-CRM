@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { TeamMember } from "@/lib/admin";
 import { Badge, Button, Field, Input, Select, Notice, cn } from "@/components/ui";
 import { ChevronDown, Shield } from "@/components/icons";
@@ -40,9 +41,17 @@ export function UserRow({
   const [outreach, setOutreach] = useState(String(user.targets.outreach));
 
   const [reassignTo, setReassignTo] = useState("");
+  const router = useRouter();
 
   function run(fn: () => Promise<{ error?: string; message?: string } | null>) {
-    start(async () => setResult(await fn()));
+    start(async () => {
+      const res = await fn();
+      setResult(res);
+    /* revalidatePath marks the server cache stale; router.refresh() is what
+       re-renders. Without it the change lands in the database and the screen
+       keeps showing the old value until a manual reload. */
+      if (!res?.error) router.refresh();
+    });
   }
 
   const otherActive = everyone.filter((u) => u.id !== user.id && u.active);

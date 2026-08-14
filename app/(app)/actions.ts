@@ -14,6 +14,17 @@ export type ActionState = { error?: string; message?: string; warning?: string }
  * and the two then disagree about the same player - the exact class of bug the
  * spreadsheet was full of.
  */
+/*  HALF THE JOB, AND THE HALF THAT IS EASY TO FORGET.
+ *
+ *  revalidatePath marks the server cache stale. It does NOT re-render a page
+ *  that is already on screen. Any CLIENT component calling one of these
+ *  actions must also call router.refresh(), or the write lands in the database
+ *  and the user watches nothing happen.
+ *
+ *  This has been found three separate times - the status dropdown, the
+ *  settings rows, and Add player, where a new lead appeared in the queue while
+ *  the Active Leads counter above it still read zero. If you add an action and
+ *  call refresh() here, check the caller. */
 function refresh() {
   revalidatePath("/today");
   revalidatePath("/book");

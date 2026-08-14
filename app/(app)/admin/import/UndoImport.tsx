@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Notice } from "@/components/ui";
 import { undoImport } from "../actions";
 
@@ -13,6 +14,7 @@ import { undoImport } from "../actions";
  */
 export function UndoImport({ batchId, count }: { batchId: string; count: number }) {
   const [confirming, setConfirming] = useState(false);
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ error?: string; message?: string } | null>(null);
 
@@ -31,7 +33,13 @@ export function UndoImport({ batchId, count }: { batchId: string; count: number 
             size="sm"
             variant="danger"
             loading={pending}
-            onClick={() => start(async () => setResult(await undoImport(batchId)))}
+            onClick={() =>
+              start(async () => {
+                const res = await undoImport(batchId);
+                setResult(res);
+                if (!res?.error) router.refresh();
+              })
+            }
           >
             Yes, remove
           </Button>

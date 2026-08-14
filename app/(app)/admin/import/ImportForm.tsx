@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import type { TeamMember } from "@/lib/admin";
 import { Button, Card, Field, Notice, Select, cn } from "@/components/ui";
 import { AlertTriangle, Check, Inbox } from "@/components/icons";
@@ -32,6 +33,16 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
     null
   );
   const [result, runAction] = useFormState<AdminState, FormData>(runImport, null);
+  const router = useRouter();
+  const lastImport = useRef<string | undefined>(undefined);
+
+  /* An import that lands 300 players and leaves the batch list looking empty
+     invites a second run of the same file. */
+  useEffect(() => {
+    if (!result?.message || result.message === lastImport.current) return;
+    lastImport.current = result.message;
+    router.refresh();
+  }, [result?.message, router]);
 
   const [target, setTarget] = useState("");
   const [fileName, setFileName] = useState("");
