@@ -68,6 +68,19 @@ async function handle(request: Request) {
   const outcome = await runWagerSync(admin, actor.id, "scheduled");
   const seconds = Math.round((Date.now() - startedAt) / 1000);
 
+  /* Housekeeping, once a day, on the run just after midnight UTC.
+  
+     Daily wager rows grow by (wagerers x codes) every single day and nothing
+     ever reads one older than two months. Left alone it is the one table that
+     grows without limit. Doing it here rather than as a separate schedule
+     means there is one moving part, not two. */
+  let pruned: number | null = null;
+  if (new Date().getUTCHours() === 0) {
+    // Housekeeping must never take the sync down with it.
+    const { data, error } = await admin.rpc("prune_wager_days", { p_keep_days: 75 });
+    pruned = error ? null : typeof data === "number" ? data : null;
+  }
+
   if ("error" in outcome) {
     return NextResponse.json({ ok: false, ...outcome, seconds }, { status: 200 });
   }
@@ -75,6 +88,7 @@ async function handle(request: Request) {
   return NextResponse.json({
     ok: true,
     seconds,
+    pruned,
     advanced: outcome.advanced,
     sources: outcome.results.map((r) => ({
       name: r.name,

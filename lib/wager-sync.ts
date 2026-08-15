@@ -161,13 +161,66 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
  * All UTC, because Roobet reports in UTC - a month here is Roobet's month, the
  * same figure the affiliate panel shows and commission is paid on.
  */
-export function currentPeriods(now = new Date()) {
-  return [
-    { type: "all" as const, start: new Date("2020-01-01T00:00:00Z"), key: "1970-01-01" },
-    { type: "month" as const, start: monthStartUtc(now), key: ymd(monthStartUtc(now)) },
-    { type: "week" as const, start: weekStartUtc(now), key: ymd(weekStartUtc(now)) },
-    { type: "day" as const, start: dayStartUtc(now), key: ymd(dayStartUtc(now)) },
+export type SyncPeriod = {
+  type: "all" | "month" | "week" | "day";
+  start: Date;
+  key: string;
+  /** A closed period ends at its boundary, not at "now". */
+  end?: Date;
+};
+
+/** How long after a boundary we keep topping up the period that just closed. */
+const GRACE_HOURS = { day: 6, week: 6, month: 12 };
+
+/**
+ * Which windows to refresh on this run.
+ *
+ * The current day, week, month and all-time - plus, briefly, the period that
+ * has JUST closed.
+ *
+ * That last part matters more than it sounds. The final sync of August runs a
+ * few minutes before midnight UTC and captures 1 Aug to 31 Aug 23:4x. The next
+ * sync writes September. Without a top-up, August is frozen having lost its
+ * last few minutes FOREVER - and the month total quietly disagrees with
+ * Roobet's affiliate panel, which is exactly the discrepancy that erodes trust
+ * in every other number on the page.
+ *
+ * A closed period is asked for with an explicit end date, so it is a complete
+ * fact rather than "start until now".
+ */
+export function currentPeriods(now = new Date()): SyncPeriod[] {
+  const dayStart = dayStartUtc(now);
+  const weekStart = weekStartUtc(now);
+  const monthStart = monthStartUtc(now);
+
+  const periods: SyncPeriod[] = [
+    { type: "all", start: new Date("2020-01-01T00:00:00Z"), key: "1970-01-01" },
+    { type: "month", start: monthStart, key: ymd(monthStart) },
+    { type: "week", start: weekStart, key: ymd(weekStart) },
+    { type: "day", start: dayStart, key: ymd(dayStart) },
   ];
+
+  const hoursInto = (boundary: Date) =>
+    (now.getTime() - boundary.getTime()) / 3_600_000;
+
+  if (hoursInto(dayStart) < GRACE_HOURS.day) {
+    const prev = new Date(dayStart.getTime() - 86_400_000);
+    periods.push({ type: "day", start: prev, key: ymd(prev), end: dayStart });
+  }
+
+  if (hoursInto(weekStart) < GRACE_HOURS.week) {
+    const prev = new Date(weekStart.getTime() - 7 * 86_400_000);
+    periods.push({ type: "week", start: prev, key: ymd(prev), end: weekStart });
+  }
+
+  if (hoursInto(monthStart) < GRACE_HOURS.month) {
+    const prev = new Date(
+      Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() - 1, 1)
+    );
+    periods.push({ type: "month", start: prev, key: ymd(prev), end: monthStart });
+  }
+
+  return periods;
 }
 
 /**
@@ -181,10 +234,13 @@ export function currentPeriods(now = new Date()) {
 export async function refreshPeriod(
   supabase: SupabaseClient,
   source: SourceRow,
-  period: { type: "all" | "month" | "week" | "day"; start: Date; key: string },
+  period: SyncPeriod,
   now = new Date()
 ): Promise<{ rows: number } | { error: string }> {
-  const outcome = await fetchSource(source, period.start.toISOString(), now.toISOString());
+  /* A closed period ends at its boundary. Asking for "start until now" would
+     bleed the new period's wagering into the old one's total. */
+  const endIso = (period.end ?? now).toISOString();
+  const outcome = await fetchSource(source, period.start.toISOString(), endIso);
   if ("error" in outcome) return { error: outcome.error };
 
   const rows = outcome
