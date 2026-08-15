@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient, SERVICE_ROLE_HELP } from "@/lib/supabase/admin";
+import { createAdminClient, serviceRoleHelp } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/admin";
 import { parseCsv, guessMapping, parseDate } from "@/lib/csv";
 
@@ -71,7 +71,7 @@ export async function createUser(
   }
 
   const admin = createAdminClient();
-  if (!admin) return { error: `Cannot create logins yet. ${SERVICE_ROLE_HELP}` };
+  if (!admin) return { error: `Cannot create logins yet. ${serviceRoleHelp()}` };
 
   const name = String(formData.get("name") ?? "").trim();
   const code = String(formData.get("code") ?? "").trim().toUpperCase();

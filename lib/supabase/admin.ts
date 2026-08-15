@@ -33,7 +33,25 @@ export function serviceRoleAvailable() {
   return Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
-export const SERVICE_ROLE_HELP =
-  "Add SUPABASE_SERVICE_ROLE_KEY to .env.local (Supabase dashboard → Project " +
-  "Settings → API → service_role) and restart the server. Keep it out of Git — " +
-  "it bypasses all security rules.";
+/**
+ * Where to put the key - which is a different place depending on where this
+ * is running.
+ *
+ * Telling someone on a live site to edit .env.local is advice for a file that
+ * does not exist there, and it reads as though the app is broken rather than
+ * unconfigured. VERCEL is set automatically on every Vercel deployment.
+ */
+export function serviceRoleHelp() {
+  const onVercel = Boolean(process.env.VERCEL);
+
+  return onVercel
+    ? "Add SUPABASE_SERVICE_ROLE_KEY in Vercel → Project → Settings → " +
+      "Environment Variables (tick Production), then redeploy — environment " +
+      "variables are read at build time, so an existing deployment will not " +
+      "pick it up. The value is in Supabase → Project Settings → API → " +
+      "service_role. Never commit it: it bypasses every security rule."
+    : "Add SUPABASE_SERVICE_ROLE_KEY to .env.local (Supabase → Project " +
+      "Settings → API → service_role) and restart the dev server. Keep it out " +
+      "of Git — it bypasses every security rule.";
+}
+

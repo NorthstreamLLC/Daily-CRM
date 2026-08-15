@@ -1,7 +1,7 @@
 import { SectionHeader, Notice } from "@/components/ui";
 import { getMe, getSources } from "@/lib/queries";
 import { getTeam } from "@/lib/admin";
-import { serviceRoleAvailable, SERVICE_ROLE_HELP } from "@/lib/supabase/admin";
+import { serviceRoleAvailable, serviceRoleHelp } from "@/lib/supabase/admin";
 import { getTimezones } from "../actions";
 import { AddUser } from "./AddUser";
 import { UserRow } from "./UserRow";
@@ -22,6 +22,7 @@ export default async function PeoplePage() {
   const inactive = team.filter((u) => !u.active);
   const admins = active.filter((u) => u.role === "admin").length;
   const serviceReady = serviceRoleAvailable();
+  const help = serviceRoleHelp();
 
   return (
     <>
@@ -37,7 +38,7 @@ export default async function PeoplePage() {
           sources={sources}
           timezones={timezones}
           serviceRoleReady={serviceReady}
-          serviceRoleHelp={SERVICE_ROLE_HELP}
+          serviceRoleHelp={help}
         />
       </div>
 
@@ -46,7 +47,7 @@ export default async function PeoplePage() {
           <Notice tone="warning">
             Creating and blocking logins is unavailable until the service role key is
             set. Everything else on this page — roles, targets, time zones, password
-            resets — works now. {SERVICE_ROLE_HELP}
+            resets — works now. {help}
           </Notice>
         </div>
       )}
