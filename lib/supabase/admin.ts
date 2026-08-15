@@ -34,24 +34,21 @@ export function serviceRoleAvailable() {
 }
 
 /**
- * Where to put the key - which is a different place depending on where this
- * is running.
+ * Where to put the key.
  *
- * Telling someone on a live site to edit .env.local is advice for a file that
- * does not exist there, and it reads as though the app is broken rather than
- * unconfigured. VERCEL is set automatically on every Vercel deployment.
+ * This runs on Vercel, so the instruction is the Vercel one. The trap worth
+ * naming is not where the setting lives - it is that environment variables
+ * are read at build time, so adding one to a deployment that already exists
+ * changes nothing until it rebuilds. That is the step people skip, and the
+ * symptom is this message stubbornly not going away.
  */
 export function serviceRoleHelp() {
-  const onVercel = Boolean(process.env.VERCEL);
-
-  return onVercel
-    ? "Add SUPABASE_SERVICE_ROLE_KEY in Vercel → Project → Settings → " +
-      "Environment Variables (tick Production), then redeploy — environment " +
-      "variables are read at build time, so an existing deployment will not " +
-      "pick it up. The value is in Supabase → Project Settings → API → " +
-      "service_role. Never commit it: it bypasses every security rule."
-    : "Add SUPABASE_SERVICE_ROLE_KEY to .env.local (Supabase → Project " +
-      "Settings → API → service_role) and restart the dev server. Keep it out " +
-      "of Git — it bypasses every security rule.";
+  return (
+    "Add SUPABASE_SERVICE_ROLE_KEY in Vercel → Settings → Environment " +
+    "Variables, ticked for Production. Then redeploy with the build cache " +
+    "OFF — environment variables are read at build time, so an existing " +
+    "deployment will not pick it up. The value is in Supabase → Project " +
+    "Settings → API → service_role. Never commit it: it bypasses every " +
+    "security rule."
+  );
 }
-
