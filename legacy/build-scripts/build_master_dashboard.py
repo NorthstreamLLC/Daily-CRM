@@ -42,7 +42,6 @@ def autosize(ws, widths):
 # Team & KPI Targets tab (see ROSTER import below), so there's exactly one place to
 # edit a target (any rep's file) instead of keeping numbers in sync in two places.
 REPS = [
-    {"name": "Yuri", "sheet_id": "1_MRriw8lIFqUf6393GbCnTyzLwpAeLRmkIVhT6BQUZ8"},
     {"name": "Tuna", "sheet_id": "1E2DMtbb0qnQMj6PLoA3xPq59m3Gt0vnJl7UopBaMqhc"},
     {"name": "Plat", "sheet_id": "1Fk54o-UXm0eMEzi-5e1_yqmrFmyLaoRfMjLThRQRKoY"},
     {"name": "Chella", "sheet_id": "1RQVsxe270nT9Dw9GCvmcwlzuVL6D3QFNCmm1KpZOGp4"},
@@ -56,6 +55,7 @@ REPS = [
     # Daily now has a real (low) quota - see her Team & KPI Targets tab.
     {"name": "Daily", "sheet_id": "1_5BmTcpK3SWziQWPleIrTcnfciVnNJS9prFkIbbHZzw", "has_kpi": True},
     {"name": "Prime", "sheet_id": "1aWOmLGt-ajmq4lGyc2FFA-JsJqrIBogv0Cj0NKE2gKQ", "has_kpi": True},
+    {"name": "Yuri", "sheet_id": "1_MRriw8lIFqUf6393GbCnTyzLwpAeLRmkIVhT6BQUZ8", "has_kpi": True},
 ]
 
 BOOK_ROWS = 200         # must match each rep file's Book capacity
