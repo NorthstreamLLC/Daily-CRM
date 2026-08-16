@@ -55,6 +55,10 @@ def autosize(ws, widths):
 # just relabeled here to match the "Active Leads" terminology).
 # "vip_transfers" / "ftd" are daily counts, same as before.
 REPS = [
+    {"name": "Yuri", "code": "YU", "role": "Acquisition",
+     "platforms": "Discord, Telegram, Twitter, Instagram",
+     "default_source": "Discord", "has_kpi": True,
+     "kpi": {"outreach": 100, "active_leads": 20, "vip_transfers": 3, "ftd": 1}},
     {"name": "Tuna", "code": "TU", "role": "Acquisition", "platforms": "Instagram",
      "default_source": "Instagram", "has_kpi": True,
      "kpi": {"outreach": 100, "active_leads": 20, "vip_transfers": 3, "ftd": 1}},
@@ -97,7 +101,7 @@ REP_NAMES = [r["name"] for r in REPS]
 # Which single rep this run builds a full Book/Daily Task/Stats/Activity Log file for.
 # Change this and re-run to generate another rep's file - Team & KPI Targets always
 # shows the whole roster (every rep in REPS above) for context, regardless of this value.
-ACTIVE_REP = "Plat"
+ACTIVE_REP = "Yuri"
 
 # Whether this rep is measured against the 4-metric KPI framework at all - Isac/Daily
 # (managers logging their own contacts, not tracked against a quota) have this off,
