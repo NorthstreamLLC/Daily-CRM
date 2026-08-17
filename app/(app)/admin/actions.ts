@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, serviceRoleHelp } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/admin";
-import { parseCsv, guessMapping, parseDate } from "@/lib/csv";
+import { resolveStatus, parseCsv, guessMapping, parseDate } from "@/lib/csv";
 
 export type AdminState = { error?: string; message?: string; warning?: string } | null;
 
@@ -537,10 +537,11 @@ export async function previewImport(
     seen.add(key);
 
     const status = get("status");
-    if (status && !validStatuses.has(status)) {
+    const resolved = resolveStatus(status, validStatuses);
+    if (resolved.renamedFrom) {
       problems.push({
         row: rowNumber,
-        reason: `Unknown status "${status}" — will be set to Initial Contact`,
+        reason: `"${resolved.renamedFrom}" is no longer a status — importing as ${resolved.status}`,
         handle,
       });
     }
@@ -568,7 +569,7 @@ export async function previewImport(
         handle,
         roobet_username: get("roobet_username"),
         source,
-        status: status && validStatuses.has(status) ? status : "Initial Contact",
+        status: resolved.status,
         last_contact_at: get("last_contact_at"),
       });
     }
@@ -690,7 +691,7 @@ export async function runImport(
       handle,
       roobet_username: get("roobet_username") || null,
       source: get("source") || null,
-      status: status && validStatuses.has(status) ? status : "Initial Contact",
+      status: resolveStatus(status, validStatuses).status,
       notes: get("notes") || null,
       assigned_at: (assigned.date ?? new Date()).toISOString(),
       last_contact_at: lastContact.date ? lastContact.date.toISOString() : null,

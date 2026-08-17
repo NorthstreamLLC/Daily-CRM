@@ -189,3 +189,64 @@ export function parseDate(value: string): { date: Date | null; error?: string } 
 
   return { date: null, error: `Unreadable date "${raw}". Use YYYY-MM-DD.` };
 }
+
+
+/* ------------------------------------------------- Retired status names */
+
+/**
+ * Statuses the old spreadsheets still offer, mapped to what replaced them.
+ *
+ * The funnel was simplified: 'Interested' had the same cadence and next
+ * action as Initial Contact, and KYC became its own field rather than a
+ * stage. Thirteen sheets still have those in their dropdowns, and asking
+ * someone to hand-edit every one before an import is work a lookup table can
+ * do instead.
+ *
+ * KYC Complete becomes First Deposit rather than Initial Contact, because
+ * someone who finished KYC is further along - dropping them to the start of
+ * the funnel would put "check their KYC" in front of a rep for a player whose
+ * KYC is done.
+ */
+export const RETIRED_STATUSES: Record<string, string> = {
+  "interested": "Initial Contact",
+  "kyc started": "Initial Contact",
+  "kyc complete": "First Deposit",
+  "kyc completed": "First Deposit",
+  "deposited": "First Deposit",
+  "first time deposit": "First Deposit",
+  "ftd": "First Deposit",
+  "vip transfer": "VIP Transferred",
+  "vip": "VIP Transferred",
+  "dead": "Dead Lead",
+  "reactivation": "Reactivation Queue",
+  "potential": "Potential Lead",
+};
+
+/**
+ * Resolve whatever the sheet said into a status the CRM has.
+ *
+ * Returns the resolved name and whether it was renamed, so the preview can
+ * say "these 41 rows will become First Deposit" rather than silently changing
+ * them.
+ */
+export function resolveStatus(
+  raw: string,
+  valid: Set<string>
+): { status: string; renamedFrom?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { status: "Initial Contact" };
+  if (valid.has(trimmed)) return { status: trimmed };
+
+  // Case-insensitive match against the real names first.
+  const exact = Array.from(valid).find(
+    (v) => v.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (exact) return { status: exact };
+
+  const mapped = RETIRED_STATUSES[trimmed.toLowerCase()];
+  if (mapped && valid.has(mapped)) {
+    return { status: mapped, renamedFrom: trimmed };
+  }
+
+  return { status: "Initial Contact", renamedFrom: trimmed };
+}

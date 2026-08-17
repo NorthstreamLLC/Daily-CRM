@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { PlayerMessage } from "@/lib/book";
 import { Button, Notice, Select, Textarea, cn } from "@/components/ui";
 import { MessageSquare } from "@/components/icons";
-import { deleteMessage, logMessage } from "./actions";
+import { deleteMessage, listTemplates, logMessage, saveTemplate, type Template } from "./actions";
 import { formatDateTime } from "@/lib/time";
 
 const CHANNELS = [
@@ -47,6 +47,13 @@ export function MessageLog({
   const [direction, setDirection] = useState<"out" | "in">("out");
   const [result, setResult] = useState<{ error?: string; message?: string } | null>(null);
   const [pending, start] = useTransition();
+  const [templates, setTemplates] = useState<Template[]>([]);
+
+  /* Snippets load once. Reps send the same opener dozens of times a day and
+     retyping it is the definition of avoidable work. */
+  useEffect(() => {
+    listTemplates().then(setTemplates).catch(() => setTemplates([]));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -104,6 +111,26 @@ export function MessageLog({
               </option>
             ))}
           </Select>
+          {templates.length > 0 && (
+            <Select
+              value=""
+              aria-label="Insert a template"
+              className="w-auto min-w-[128px]"
+              onChange={(e) => {
+                const t = templates.find((x) => x.id === e.target.value);
+                if (t) setBody((b) => (b ? b + "\n" + t.body : t.body));
+              }}
+            >
+              <option value="">Template…</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                  {t.shared ? " (team)" : ""}
+                </option>
+              ))}
+            </Select>
+          )}
+
           {direction === "out" && (
             <span className="text-caption text-ink-subtle">
               Marks them contacted
@@ -130,8 +157,27 @@ export function MessageLog({
           }}
         />
 
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-caption text-ink-subtle">⌘/Ctrl + Enter</span>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <span className="text-caption text-ink-subtle">⌘/Ctrl + Enter</span>
+            {body.trim().length > 15 && (
+              <button
+                type="button"
+                className="text-caption text-accent underline-offset-2 hover:underline"
+                onClick={() => {
+                  const name = window.prompt("Save this as a template. Name it:");
+                  if (!name) return;
+                  start(async () => {
+                    const res = await saveTemplate(name, body);
+                    setResult(res);
+                    if (!res.error) listTemplates().then(setTemplates);
+                  });
+                }}
+              >
+                Save as template
+              </button>
+            )}
+          </span>
           <Button
             size="sm"
             variant="primary"

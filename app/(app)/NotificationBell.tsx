@@ -30,6 +30,28 @@ export function NotificationBell({ unread }: { unread: number }) {
   // Server count wins whenever the page re-renders.
   useEffect(() => setCount(unread), [unread]);
 
+  /* Poll while the tab is open and visible.
+  
+     The layout only recalculates on navigation, so a rep parked on Today all
+     morning would never see a badge appear - which is most of the value of
+     having one. Two minutes is frequent enough to feel live and rare enough
+     to be free; hidden tabs are skipped entirely. */
+  useEffect(() => {
+    async function check() {
+      if (document.hidden || open) return;
+      try {
+        const r = await fetch("/api/notifications/count");
+        if (!r.ok) return;
+        const { unread: n } = await r.json();
+        if (typeof n === "number") setCount(n);
+      } catch {
+        // Offline or mid-deploy - the next tick will pick it up.
+      }
+    }
+    const timer = setInterval(check, 120_000);
+    return () => clearInterval(timer);
+  }, [open]);
+
   // Click outside, or Escape, closes it.
   useEffect(() => {
     if (!open) return;

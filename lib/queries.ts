@@ -143,7 +143,8 @@ export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
 export async function getComingUp(
   me: Me,
   windowDays: number,
-  ownerId?: string
+  ownerId?: string,
+  limit = 300
 ): Promise<Player[]> {
   const supabase = createClient();
   const startToday = startOfDayUtc(me.timezone).toISOString();
@@ -160,10 +161,34 @@ export async function getComingUp(
         `and(assigned_at.gte.${startToday},last_contact_at.gte.${startToday})`
     )
     .order("next_followup_at", { ascending: true })
-    .limit(300);
+    .limit(limit);
 
   if (error) throw error;
   return (data ?? []) as unknown as Player[];
+}
+
+/** How many are scheduled in the window, without fetching them. */
+export async function countComingUp(
+  me: Me,
+  windowDays: number,
+  ownerId?: string
+): Promise<number> {
+  const supabase = createClient();
+  const startToday = startOfDayUtc(me.timezone).toISOString();
+  const endToday = endOfDayUtc(me.timezone).toISOString();
+  const horizon = startOfDayPlusUtc(me.timezone, windowDays + 1).toISOString();
+
+  const { count } = await supabase
+    .from("players_enriched")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", ownerId || me.id)
+    .eq("is_dead", false)
+    .or(
+      `and(missing_roobet.eq.false,next_followup_at.gt.${endToday},next_followup_at.lte.${horizon}),` +
+        `and(assigned_at.gte.${startToday},last_contact_at.gte.${startToday})`
+    );
+
+  return count ?? 0;
 }
 
 /**

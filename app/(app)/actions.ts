@@ -1012,3 +1012,81 @@ export async function markNotificationsRead(): Promise<{ error?: string }> {
   }
   return {};
 }
+
+/* ------------------------------------------------------ Message templates */
+
+export type Template = { id: string; name: string; body: string; shared: boolean };
+
+/** Shared snippets plus this rep's own. */
+export async function listTemplates(): Promise<Template[]> {
+  const me = await getMe();
+  if (!me) return [];
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from("message_templates")
+    .select("id, name, body, owner_id")
+    .eq("active", true)
+    .order("sort_order")
+    .order("name");
+
+  if (error) return [];
+  return (data ?? []).map((t) => ({
+    id: t.id as string,
+    name: t.name as string,
+    body: t.body as string,
+    shared: t.owner_id === null,
+  }));
+}
+
+/**
+ * Save a snippet.
+ *
+ * A rep's own by default. Only an admin can make one shared, because a
+ * template everybody sees is a decision about how the team talks, not a
+ * personal shortcut.
+ */
+export async function saveTemplate(
+  name: string,
+  body: string,
+  shared = false
+): Promise<{ error?: string; message?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const cleanName = name.trim();
+  const cleanBody = body.trim();
+  if (!cleanName) return { error: "Give it a name so you can find it." };
+  if (!cleanBody) return { error: "The template is empty." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("message_templates").insert({
+    name: cleanName,
+    body: cleanBody,
+    owner_id: shared && me.role === "admin" ? null : me.id,
+  });
+
+  if (error) {
+    return {
+      error: /does not exist|schema cache/i.test(error.message)
+        ? "Run migration 20260812000021_messages.sql first."
+        : error.message,
+    };
+  }
+
+  refresh();
+  return { message: `Saved "${cleanName}".` };
+}
+
+/** Remove one. RLS stops a rep deleting a shared template. */
+export async function deleteTemplate(id: string): Promise<{ error?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+  const { error } = await supabase.from("message_templates").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  refresh();
+  return {};
+}

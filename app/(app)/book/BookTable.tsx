@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Player } from "@/lib/queries";
 import type { BookSort } from "@/lib/book";
 import { CopyHandle, OpenProfile } from "../CopyHandle";
+import { QuickNote } from "../QuickNote";
 import { Badge, Button, Select, cn } from "@/components/ui";
 import {
   AlertTriangle,
@@ -394,23 +395,24 @@ export function BookTable({
                     </td>
 
                     <td className="px-3 py-3 text-right align-middle">
-                      <button
-                        type="button"
-                        onClick={() => setExpanded(isOpen ? null : p.id)}
-                        aria-expanded={isOpen}
-                        aria-label={isOpen ? `Hide details for ${p.handle}` : `Edit ${p.handle}`}
-                        className={cn(
-                          "inline-flex h-7 w-7 items-center justify-center rounded-control",
-                          "transition-colors duration-fast",
-                          isOpen
-                            ? "bg-accent text-white btn-on-accent"
-                            : p.notes
-                            ? "text-accent hover:bg-accent-soft"
-                            : "text-ink-subtle hover:bg-sunken hover:text-ink"
-                        )}
-                      >
-                        {p.notes ? <MessageSquare size={14} /> : <ChevronDown size={14} />}
-                      </button>
+                      <span className="inline-flex items-center gap-1">
+                        <QuickNote playerId={p.id} notes={p.notes} handle={p.handle} />
+                        <button
+                          type="button"
+                          onClick={() => setExpanded(isOpen ? null : p.id)}
+                          aria-expanded={isOpen}
+                          aria-label={isOpen ? `Hide details for ${p.handle}` : `Edit ${p.handle}`}
+                          className={cn(
+                            "inline-flex h-7 w-7 items-center justify-center rounded-control",
+                            "transition-colors duration-fast",
+                            isOpen
+                              ? "bg-accent text-white btn-on-accent"
+                              : "text-ink-subtle hover:bg-sunken hover:text-ink"
+                          )}
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </span>
                     </td>
                   </tr>
 

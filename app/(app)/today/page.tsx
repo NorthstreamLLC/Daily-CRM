@@ -19,6 +19,7 @@ import {
   getMe,
   getDueNow,
   getComingUp,
+  countComingUp,
   countDeadLeads,
   getTodayStats,
   getTargets,
@@ -214,10 +215,13 @@ export default async function TodayPage({
 
   const supabase = createClient();
 
-  const [dueNow, comingUp, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
+  const [dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
       getDueNow(me, ownerId),
-      getComingUp(me, comingUpDays, ownerId),
+      // Cap it: a rep with 200 follow-ups in the window should not get
+      // 200 rows in one go. The tab badge shows the true total.
+      getComingUp(me, comingUpDays, ownerId, 60),
+      countComingUp(me, comingUpDays, ownerId),
       /* Dead leads are not today's work - they are a standing list, and at
          300 players they buried the rows that actually need doing. They live
          in the Book now, one filter click away. Only the count is kept, for
@@ -400,7 +404,7 @@ export default async function TodayPage({
       <TodayTabs
         current={tab}
         workCount={dueNow.length}
-        comingCount={comingUp.length}
+        comingCount={comingTotal}
       />
 
       {tab === "work" ? (
@@ -497,7 +501,7 @@ export default async function TodayPage({
             <div className="overflow-hidden rounded-card border border-line-strong bg-surface shadow-card">
               <ListHeading
                 title={`Next ${comingUpDays} days`}
-                count={comingUp.length}
+                count={comingTotal}
                 hint="nothing to do yet"
               />
               {comingUp.map((p, i) => (
@@ -509,6 +513,12 @@ export default async function TodayPage({
                   striped={i % 2 === 1}
                 />
               ))}
+              {comingTotal > comingUp.length && (
+                <p className="border-t border-line-strong px-3 py-2 text-small text-ink-muted">
+                  Showing the next {comingUp.length} of {comingTotal}. The rest arrive on
+                  their own days.
+                </p>
+              )}
             </div>
           )}
         </>

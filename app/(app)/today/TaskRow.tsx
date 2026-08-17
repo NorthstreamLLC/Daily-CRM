@@ -4,10 +4,11 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Player } from "@/lib/queries";
 import { Badge, cn } from "@/components/ui";
-import { AlertTriangle, Check, ChevronDown, MessageSquare } from "@/components/icons";
+import { AlertTriangle, Check, ChevronDown } from "@/components/icons";
 import { completeTask, undoCompleteTask } from "../actions";
 import { PlayerDetail, StatusSelect, formatDate, type StatusOption } from "../shared";
 import { CopyHandle, OpenProfile } from "../CopyHandle";
+import { QuickNote } from "../QuickNote";
 import { relativeDays } from "@/lib/time";
 
 /**
@@ -184,24 +185,26 @@ export function TaskRow({
           <div className="min-w-0 flex-1 lg:flex-none">
             <StatusSelect player={player} statuses={statuses} size="sm" />
           </div>
+          <QuickNote
+            playerId={player.id}
+            notes={player.notes}
+            handle={player.handle}
+          />
+
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={
-              open ? `Hide details for ${player.handle}` : `Notes and details for ${player.handle}`
-            }
+            aria-label={open ? `Hide details for ${player.handle}` : `Details for ${player.handle}`}
             className={cn(
               "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control",
               "transition-colors duration-fast",
               open
                 ? "bg-accent text-white btn-on-accent"
-                : player.notes
-                ? "text-accent hover:bg-accent-soft"
                 : "text-ink-subtle hover:bg-sunken hover:text-ink"
             )}
           >
-            {player.notes ? <MessageSquare size={14} /> : <ChevronDown size={14} />}
+            <ChevronDown size={14} />
           </button>
         </div>
 
