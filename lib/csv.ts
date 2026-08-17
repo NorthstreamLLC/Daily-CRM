@@ -113,7 +113,18 @@ export function toCsv(headers: { key: string; label: string }[], rows: Row[]): s
  * squashed lowercase form rather than exact text.
  */
 const ALIASES: Record<string, string[]> = {
-  handle: ["handle", "playerhandle", "player", "username", "name", "leadname"],
+  handle: [
+    "handle",
+    "playerhandle",
+    "player",
+    "username",
+    "name",
+    "leadname",
+    // What our own old spreadsheets actually call it.
+    "playernamehandle",
+    "playername",
+    "playerhandlename",
+  ],
   roobet_username: [
     "roobetusername",
     "roobet",
@@ -147,6 +158,30 @@ export function guessMapping(headers: string[]): Record<string, number> {
     const index = squashed.findIndex((h) => aliases.includes(h));
     if (index !== -1) mapping[field] = index;
   }
+
+  /* Last resort for the one column that is mandatory.
+  
+     Without a handle the import refuses to run at all, so rather than fail on
+     a header nobody anticipated - "Player Name / Handle", "Lead Handle (IG)" -
+     take the first column that merely CONTAINS handle, then the first that
+     contains player. Never a column already claimed by something else, so
+     "Player ID" cannot be mistaken for the name.
+  
+     Deliberately only for handle. Guessing loosely at a status or a date
+     would put wrong data in silently; guessing at the handle either finds the
+     name column or produces obvious nonsense the preview will show. */
+  if (mapping.handle === undefined) {
+    const taken = new Set(Object.values(mapping));
+    const loose = (needle: string) =>
+      squashed.findIndex(
+        (h, i) => !taken.has(i) && h.includes(needle) && !h.includes("id")
+      );
+
+    const byHandle = loose("handle");
+    const byPlayer = byHandle !== -1 ? byHandle : loose("player");
+    if (byPlayer !== -1) mapping.handle = byPlayer;
+  }
+
   return mapping;
 }
 
