@@ -189,6 +189,17 @@ export default async function StatsPage({
   const viewingSomeoneElse = ownerId !== me.id;
 
   const supabase = createClient();
+
+  /* Wager cannot follow the rolling ranges above it.
+  
+     Roobet is only ever asked for whole UTC periods, so "last 30 days" has no
+     wager figure - the nearest true window is the current UTC month. On the
+     3rd of the month that is 3 days of wager sitting beside 30 days of
+     outreach. Labelling both "last 30 days" would be a straightforward lie,
+     so the wager card carries its own period name. */
+  const wagerPeriod = resolveReportPeriod(reportChoiceFor(range.key));
+  const rangesDiffer = wagerPeriod.label.toLowerCase() !== range.label.toLowerCase();
+
   const targets = await getTargets(me, ownerId);
 
   const [funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
@@ -201,7 +212,7 @@ export default async function StatsPage({
       // RLS scopes this to the viewer's own players, so a rep sees their book's
       // composition and an admin viewing here sees everyone's combined.
       getFunnelStages(),
-      getWagerReport(resolveReportPeriod(reportChoiceFor(range.key)).period, ownerId),
+      getWagerReport(wagerPeriod.period, ownerId),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
         : Promise.resolve({ data: null }),
@@ -411,7 +422,11 @@ export default async function StatsPage({
       <section className="mb-8">
         <SectionHeader
           title="What your players wagered"
-          hint="Weighted wager from your book in this window. This is what your leads are actually worth."
+          hint={
+            rangesDiffer
+              ? `Weighted wager from your book. Roobet reports whole UTC periods, so this shows ${wagerPeriod.label.toLowerCase()} — not ${range.label.toLowerCase()} like the figures above.`
+              : "Weighted wager from your book in this window. This is what your leads are actually worth."
+          }
           action={
             wager.rows.length > 0 ? (
               <a
@@ -437,7 +452,7 @@ export default async function StatsPage({
           <>
             <div className="mb-3 grid gap-3 sm:grid-cols-2">
               <Metric
-                label={`Wagered — ${range.label.toLowerCase()}`}
+                label={`Wagered — ${wagerPeriod.label.toLowerCase()}`}
                 value={
                   "$" +
                   wager.total.toLocaleString(undefined, { maximumFractionDigits: 0 })
