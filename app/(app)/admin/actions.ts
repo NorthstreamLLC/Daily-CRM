@@ -247,6 +247,18 @@ export async function reassignBook(
 
   await supabase.rpc("sync_reference_counter", { p_user: toUserId });
   await audit(me.id, "reassign_book", fromUserId, { to: toUserId, count: data });
+
+  /* The receiving rep needs to know. Waking up to a hundred extra players
+     with no explanation is how a handover turns into a complaint. */
+  if ((data ?? 0) > 0) {
+    await supabase.from("notifications").insert({
+      user_id: toUserId,
+      kind: "book_assigned",
+      title: `${data} players moved into your book`,
+      body: "An admin reassigned them. They appear in your queue on their normal cadence.",
+    });
+  }
+
   refresh();
   return { message: `${data ?? 0} players moved.` };
 }

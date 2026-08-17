@@ -283,3 +283,62 @@ export async function getSources() {
     .order("sort_order");
   return (data ?? []).map((s) => s.name as string);
 }
+
+/* ------------------------------------------------------------ Notifications */
+
+export type Notification = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  playerId: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
+/**
+ * The inbox, newest first.
+ *
+ * Only moments live here - a player started wagering, a book was handed over.
+ * Standing state like "5 overdue" is counted on the page instead, because a
+ * number you can recalculate should never be a row you have to maintain.
+ *
+ * Row Level Security scopes this to the viewer, so there is no owner
+ * parameter: an inbox is personal even for an admin.
+ */
+export async function getNotifications(limit = 20): Promise<Notification[]> {
+  const supabase = createClient();
+
+  const { data } = await supabase
+    .from("notifications")
+    .select("id, kind, title, body, player_id, created_at, read_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  return (data ?? []).map((n) => ({
+      id: n.id as string,
+      kind: n.kind as string,
+      title: n.title as string,
+      body: n.body as string | null,
+      playerId: n.player_id as string | null,
+    createdAt: n.created_at as string,
+    readAt: n.read_at as string | null,
+  }));
+}
+
+/**
+ * Just the badge number.
+ *
+ * The layout renders on every navigation, so it asks for the count and
+ * nothing else - head: true returns it in a header with no rows at all. The
+ * list itself is fetched when the panel is actually opened, which for most
+ * reps on most days is never.
+ */
+export async function getUnreadCount(): Promise<number> {
+  const supabase = createClient();
+  const { count } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .is("read_at", null);
+  return count ?? 0;
+}

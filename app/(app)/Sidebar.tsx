@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { NotificationBell } from "./NotificationBell";
 import { Mark, PRODUCT_NAME } from "@/components/Brand";
 import {
   BarChart,
@@ -45,10 +46,12 @@ export function Sidebar({
   items,
   user,
   signOut,
+  unreadCount,
 }: {
   items: NavItem[];
   user: { name: string; code: string; role: string; today: string };
   signOut: () => Promise<void>;
+  unreadCount: number;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -111,7 +114,10 @@ export function Sidebar({
           </p>
         </div>
       </div>
-      <ThemeToggle />
+      <div className="flex items-center gap-1">
+        <NotificationBell unread={unreadCount} />
+        <ThemeToggle />
+      </div>
       <form action={signOut}>
         <button
           type="submit"

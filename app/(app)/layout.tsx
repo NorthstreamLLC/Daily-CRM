@@ -1,5 +1,5 @@
 import { signOut } from "../login/actions";
-import { getMe } from "@/lib/queries";
+import { getMe, getUnreadCount } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 import { formatToday } from "@/lib/time";
 import { Sidebar, type NavItem } from "./Sidebar";
@@ -67,6 +67,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
+  const unreadCount = await getUnreadCount();
+
   const items: NavItem[] = [
     { href: "/today", label: "Today", icon: "today" },
     { href: "/calendar", label: "Calendar", icon: "calendar" },
@@ -88,6 +90,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           today: formatToday(me.timezone),
         }}
         signOut={signOut}
+        unreadCount={unreadCount}
       />
 
       <main className="lg:pl-60">

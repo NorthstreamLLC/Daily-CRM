@@ -291,12 +291,13 @@ export async function runWagerSync(
   // wager come too - the automatic advance needs both.
   const { data: players } = await supabase
     .from("players")
-    .select("id, roobet_username, status, weighted_wager, first_deposit_at, owner_id")
+    .select("id, handle, roobet_username, status, weighted_wager, first_deposit_at, owner_id")
     .not("roobet_username", "is", null)
     .limit(100000);
 
   type PlayerRow = {
     id: string;
+    handle: string;
     roobet_username: string | null;
     status: string;
     weighted_wager: number | null;
@@ -554,6 +555,23 @@ export async function runWagerSync(
       from_status: move.from,
       to_status: "Active",
       metadata: { automatic: true, trigger: "wager", wagered: move.wagered },
+    });
+
+    /* Tell the rep who owns them.
+    
+       This is the single most useful thing the app knows that a rep does not:
+       someone they chased has started playing, and the sync noticed at 3am.
+       Without this it is a silent status change they find days later, if at
+       all - and the moment right after a first bet is when a check-in lands
+       best. */
+    await supabase.from("notifications").insert({
+      user_id: move.ownerId,
+      kind: "wager_started",
+      title: `${player?.handle ?? "A player"} started wagering`,
+      body:
+        `$${Math.round(move.wagered).toLocaleString()} weighted wager. ` +
+        `Moved from ${move.from} to Active automatically.`,
+      player_id: move.playerId,
     });
   }
 

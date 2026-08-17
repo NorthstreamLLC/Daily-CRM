@@ -991,3 +991,24 @@ export async function bulkAddPlayers(
     duplicates,
   };
 }
+
+
+/* --------------------------------------------------------- Notifications */
+
+/** Opening the panel is reading them. No separate dismiss step. */
+export async function markNotificationsRead(): Promise<{ error?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("mark_notifications_read");
+
+  if (error) {
+    return {
+      error: /does not exist|schema cache/i.test(error.message)
+        ? "Run migration 20260812000025_notifications.sql first."
+        : error.message,
+    };
+  }
+  return {};
+}

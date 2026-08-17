@@ -79,6 +79,9 @@ async function handle(request: Request) {
     // Housekeeping must never take the sync down with it.
     const { data, error } = await admin.rpc("prune_wager_days", { p_keep_days: 75 });
     pruned = error ? null : typeof data === "number" ? data : null;
+
+    // Same reasoning: an inbox nobody prunes becomes a table nobody queries fast.
+    await admin.rpc("prune_notifications");
   }
 
   if ("error" in outcome) {
