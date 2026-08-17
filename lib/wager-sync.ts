@@ -23,7 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 type Entry = { username: string; wagered: number };
 
-type SourceRow = {
+export type SourceRow = {
   id: string;
   name: string;
   url: string;
@@ -81,7 +81,7 @@ function readEntry(raw: unknown): Entry | null {
   return { username: username.trim(), wagered };
 }
 
-async function fetchSource(
+export async function fetchSource(
   source: SourceRow,
   startIso?: string,
   endIso?: string

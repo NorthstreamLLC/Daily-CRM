@@ -14,6 +14,7 @@ import {
 } from "@/lib/admin";
 import { getChurn } from "@/lib/churn";
 import { ReportControls } from "./ReportControls";
+import { DateRangeWager } from "./DateRangeWager";
 import { ChurnList } from "../../ChurnList";
 import { PeriodPlayers } from "./PeriodPlayers";
 import { AutoSync } from "./AutoSync";
@@ -561,6 +562,15 @@ export default async function WagerPage({
                 )}
               </Card>
             </div>
+          </section>
+
+          {/* Any two dates - asked of Roobet live */}
+          <section className="mb-8">
+            <SectionHeader
+              title="Wager between two dates"
+              hint="For a window the stored periods cannot answer — a promo run, a stream week, a partial month. Asked of Roobet directly, so it is exact rather than estimated."
+            />
+            <DateRangeWager />
           </section>
 
           {/* The exportable report */}
