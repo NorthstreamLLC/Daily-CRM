@@ -3,20 +3,18 @@ import { Card, EmptyState, Notice, SectionHeader, cn } from "@/components/ui";
 import { TrendingUp, Users, Wallet } from "@/components/icons";
 import { getMe } from "@/lib/queries";
 import {
-  getPeriodPlayers,
   getRepPeriods,
   getTeam,
   getWagerOverview,
   getWagerPeriods,
   getWagerReport,
-  resolvePeriodKey,
   resolveReportPeriod,
 } from "@/lib/admin";
 import { getChurn } from "@/lib/churn";
 import { ReportControls } from "./ReportControls";
 import { DateRangeWager } from "./DateRangeWager";
+import { RetireUnclaimed } from "./RetireUnclaimed";
 import { ChurnList } from "../../ChurnList";
-import { PeriodPlayers } from "./PeriodPlayers";
 import { AutoSync } from "./AutoSync";
 import { WagerTrend } from "./WagerTrend";
 
@@ -51,13 +49,6 @@ export default async function WagerPage({
     return Array.isArray(v) ? v[0] : v;
   };
 
-  // Per-player list: pp = period, pq = search, ppg = page, pre = show retired.
-  // Defaults to all time, the figure that does not move under you.
-  const periodChoice = one("pp") ?? "all";
-  const periodKey = resolvePeriodKey(periodChoice);
-  const periodSearch = one("pq") ?? "";
-  const periodPage = Math.max(1, Number(one("ppg")) || 1);
-
   // Report: rp = period, ro = rep filter.
   const reportChoice = one("rp") ?? "all";
   const reportOwner = one("ro") ?? "";
@@ -66,7 +57,7 @@ export default async function WagerPage({
   /* All seven in one pass. These were three sequential awaits, which on a
      page already doing a dozen queries meant three full round trips stacked
      end to end for no reason - none of them needs another's answer. */
-  const [overview, report, churn, periods, team, repPeriods, periodPlayers] =
+  const [overview, report, churn, periods, team, repPeriods] =
     await Promise.all([
       getWagerOverview(me.timezone, "", 1),
       getWagerReport(reportPeriod.period, reportOwner || undefined, 500),
@@ -74,7 +65,6 @@ export default async function WagerPage({
       getWagerPeriods(),
       getTeam(),
       getRepPeriods(),
-      getPeriodPlayers(periodKey.type, periodKey.start, periodSearch, periodPage),
     ]);
 
   /* Every dollar figure on this page comes from wager_periods. The ledger
@@ -199,6 +189,148 @@ export default async function WagerPage({
             <WagerTrend history={periods.history} />
           </section>
 
+          {/* THE ONE PLAYER-LEVEL LIST.
+
+              There were three: "Wager by player", "Wager between two dates"
+              and "Wager report", whose own descriptions were near enough the
+              same sentence. They had grown apart rather than been designed
+              apart - one got search and the pre-existing toggle, another got
+              the rep filter and the CSV, the third got live date ranges - so
+              you had to know which was which to find anything.
+
+              One list, three ways to choose the window. */}
+          <section className="mb-8">
+            <SectionHeader
+              title="Every wagerer"
+              hint="Everyone who wagered in the window, in a book or not. Pick a period or exact dates, filter to a rep, export it."
+              action={
+                <a
+                  href={`/api/wager-report?${reportQuery.toString()}`}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-control border
+                             border-line-strong bg-surface px-3.5 text-body font-medium
+                             text-ink-muted transition-colors duration-fast hover:bg-sunken
+                             hover:text-ink"
+                >
+                  Export CSV
+                </a>
+              }
+            />
+
+            <ReportControls
+              choice={reportChoice}
+              owner={reportOwner}
+              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
+              years={Array.from(
+                new Set(periods.months.map((m) => m.month.slice(0, 4)))
+              ).sort((a, b) => b.localeCompare(a))}
+              reps={team.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }))}
+            />
+
+            {/* Exact dates, for a window the stored periods cannot answer - a
+                promo run, a stream week, a partial month. Asked of Roobet
+                directly, so it is exact rather than estimated. */}
+            <div className="mb-4">
+              <DateRangeWager />
+            </div>
+
+            {/* One-time housekeeping: draw the line under everyone who was
+                already wagering before any of this existed, so "unclaimed"
+                comes to mean "new, and worth chasing". */}
+            {unclaimed.count > 0 && (
+              <div className="mb-4">
+                <RetireUnclaimed count={unclaimed.count} />
+              </div>
+            )}
+
+            <div className="mb-3 grid gap-3 sm:grid-cols-3">
+              <Total label={`${reportPeriod.label} — total`} value={report.total} emphasis />
+              <Total label="In a rep's book" value={report.claimedTotal} />
+              <Total
+                label="No owner"
+                value={report.unclaimedTotal}
+                plainSub={`${report.wagererCount.toLocaleString()} wagerers in this window`}
+              />
+            </div>
+
+            {report.rows.length === 0 ? (
+              <EmptyState
+                icon={<Wallet size={18} />}
+                title={`Nothing wagered in ${reportPeriod.label.toLowerCase()}`}
+                body={
+                  reportOwner
+                    ? "No player in this rep's book wagered in this window."
+                    : "Run a sync, or use the backfill in Settings to load months from before you started syncing."
+                }
+              />
+            ) : (
+              <div className="overflow-x-auto rounded-card border border-line-strong bg-surface shadow-card no-scrollbar">
+                <table className="w-full min-w-[820px] text-left">
+                  <thead>
+                    <tr className="border-b-2 border-line-heavy bg-sunken">
+                      <Th className="w-10">#</Th>
+                      <Th>Roobet username</Th>
+                      <Th>Player</Th>
+                      <Th>Rep</Th>
+                      <Th>Status</Th>
+                      <Th align="right">{reportPeriod.label}</Th>
+                      <Th align="right">All time</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.rows.slice(0, 100).map((r, i) => (
+                      <tr
+                        key={r.username}
+                        className={cn(
+                          "border-b border-line-heavy last:border-0",
+                          i % 2 === 1 && "bg-sunken/40"
+                        )}
+                      >
+                        <td className="tabular px-4 py-2 text-caption text-ink-subtle">
+                          {i + 1}
+                        </td>
+                        <td className="px-4 py-2 text-body font-medium text-ink">
+                          {r.playerId ? (
+                            <Link
+                              href={`/book?player=${r.playerId}`}
+                              className="text-accent underline-offset-2 hover:underline"
+                            >
+                              {r.username}
+                            </Link>
+                          ) : (
+                            r.username
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.handle ?? "—"}
+                          {r.reference && (
+                            <span className="tabular ml-2 text-caption text-ink-subtle">
+                              {r.reference}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.ownerName ?? "—"}
+                        </td>
+                        <td className="px-4 py-2 text-small text-ink-muted">
+                          {r.status ?? "—"}
+                        </td>
+                        <Td strong>{money(r.wagered)}</Td>
+                        <Td muted>{money(r.allTime)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {report.rows.length > 100 && (
+                  <p className="border-t border-line-strong px-4 py-2.5 text-small text-ink-muted">
+                    Showing the top 100 of {report.rows.length.toLocaleString()}. The CSV
+                    has every row.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+
+
           {/* Per rep */}
           <section className="mb-8">
             <SectionHeader
@@ -271,23 +403,6 @@ export default async function WagerPage({
                 </table>
               </div>
             )}
-          </section>
-
-          {/* Who wagered it */}
-          <section className="mb-8">
-            <SectionHeader
-              title="Wager by player"
-              hint="Every wagerer for the chosen period, biggest first. Claimed and unclaimed together, so this always adds up to the total above."
-            />
-            <PeriodPlayers
-              rows={periodPlayers.rows}
-              total={periodPlayers.total}
-              page={periodPlayers.page}
-              pages={periodPlayers.pages}
-              choice={periodChoice}
-              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
-              unclaimedCount={unclaimed.count}
-            />
           </section>
 
           {/* Falling away - the company view */}
@@ -535,130 +650,6 @@ export default async function WagerPage({
             </div>
           </section>
 
-          {/* Any two dates - asked of Roobet live */}
-          <section className="mb-8">
-            <SectionHeader
-              title="Wager between two dates"
-              hint="For a window the stored periods cannot answer — a promo run, a stream week, a partial month. Asked of Roobet directly, so it is exact rather than estimated."
-            />
-            <DateRangeWager />
-          </section>
-
-          {/* The exportable report */}
-          <section className="mb-8">
-            <SectionHeader
-              title="Wager report"
-              hint="Every wagerer for a whole UTC period — in a book or not. Pick a window, filter to a rep, export it."
-              action={
-                <a
-                  href={`/api/wager-report?${reportQuery.toString()}`}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-control border
-                             border-line-strong bg-surface px-3.5 text-body font-medium
-                             text-ink-muted transition-colors duration-fast hover:bg-sunken
-                             hover:text-ink"
-                >
-                  Export CSV
-                </a>
-              }
-            />
-
-            <ReportControls
-              choice={reportChoice}
-              owner={reportOwner}
-              months={periods.months.map((m) => ({ month: m.month, label: m.label }))}
-              years={Array.from(
-                new Set(periods.months.map((m) => m.month.slice(0, 4)))
-              ).sort((a, b) => b.localeCompare(a))}
-              reps={team.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name }))}
-            />
-
-            <div className="mb-3 grid gap-3 sm:grid-cols-3">
-              <Total label={`${reportPeriod.label} — total`} value={report.total} emphasis />
-              <Total label="In a rep's book" value={report.claimedTotal} />
-              <Total
-                label="No owner"
-                value={report.unclaimedTotal}
-                plainSub={`${report.wagererCount.toLocaleString()} wagerers in this window`}
-              />
-            </div>
-
-            {report.rows.length === 0 ? (
-              <EmptyState
-                icon={<Wallet size={18} />}
-                title={`Nothing wagered in ${reportPeriod.label.toLowerCase()}`}
-                body={
-                  reportOwner
-                    ? "No player in this rep's book wagered in this window."
-                    : "Run a sync, or use the backfill in Settings to load months from before you started syncing."
-                }
-              />
-            ) : (
-              <div className="overflow-x-auto rounded-card border border-line-strong bg-surface shadow-card no-scrollbar">
-                <table className="w-full min-w-[820px] text-left">
-                  <thead>
-                    <tr className="border-b-2 border-line-heavy bg-sunken">
-                      <Th className="w-10">#</Th>
-                      <Th>Roobet username</Th>
-                      <Th>Player</Th>
-                      <Th>Rep</Th>
-                      <Th>Status</Th>
-                      <Th align="right">{reportPeriod.label}</Th>
-                      <Th align="right">All time</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.rows.slice(0, 100).map((r, i) => (
-                      <tr
-                        key={r.username}
-                        className={cn(
-                          "border-b border-line-heavy last:border-0",
-                          i % 2 === 1 && "bg-sunken/40"
-                        )}
-                      >
-                        <td className="tabular px-4 py-2 text-caption text-ink-subtle">
-                          {i + 1}
-                        </td>
-                        <td className="px-4 py-2 text-body font-medium text-ink">
-                          {r.playerId ? (
-                            <Link
-                              href={`/book?player=${r.playerId}`}
-                              className="text-accent underline-offset-2 hover:underline"
-                            >
-                              {r.username}
-                            </Link>
-                          ) : (
-                            r.username
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.handle ?? "—"}
-                          {r.reference && (
-                            <span className="tabular ml-2 text-caption text-ink-subtle">
-                              {r.reference}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.ownerName ?? "—"}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.status ?? "—"}
-                        </td>
-                        <Td strong>{money(r.wagered)}</Td>
-                        <Td muted>{money(r.allTime)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {report.rows.length > 100 && (
-                  <p className="border-t border-line-strong px-4 py-2.5 text-small text-ink-muted">
-                    Showing the top 100 of {report.rows.length.toLocaleString()}. The CSV
-                    has every row.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
 
         </>
       )}
