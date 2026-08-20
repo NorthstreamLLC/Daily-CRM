@@ -763,12 +763,33 @@ export type PeriodTotals = {
 
 export type MonthRow = { month: string; label: string; total: number; wagerers: number };
 
+/** One bar on the "wagered over time" chart, whatever the grain. */
+export type HistoryPoint = {
+  /** ISO date of the period start - the day, the Monday, or the 1st. */
+  start: string;
+  label: string;
+  total: number;
+  wagerers: number;
+};
+
+export type WagerHistory = {
+  day: HistoryPoint[];
+  week: HistoryPoint[];
+  month: HistoryPoint[];
+};
+
+export type HistoryGrain = keyof WagerHistory;
+
 export type WagerPeriods = {
   all: PeriodTotals;
   month: PeriodTotals;
   week: PeriodTotals;
   day: PeriodTotals;
   months: MonthRow[];
+  /* The same facts as `months`, plus days and weeks. "Month by month" showed
+     one row because syncing started this month; days show the shape of a week
+     straight away. */
+  history: WagerHistory;
   /** Which UTC month, week and day these figures cover. */
   labels: { month: string; week: string; day: string };
   ready: boolean;
@@ -834,6 +855,24 @@ export async function getWagerPeriods(): Promise<WagerPeriods> {
       .then((r) => (r.data ?? []) as { period_start: string; total: number; wagerers: number }[]),
   ]);
 
+  /* Day, week and month series. Asked for separately from the totals above
+     because those are "right now" and these are "over time" - different
+     questions, and only these three need a row limit.
+
+     60 days is what migration 024 keeps (75, with room to spare). 26 weeks and
+     24 months are simply more than anyone reads on one screen. */
+  type HistRow = { period_start: string; total: number; wagerers: number };
+  const histFor = (type: HistoryGrain, limit: number) =>
+    supabase
+      .rpc("wager_period_history", { p_type: type, p_limit: limit })
+      .then((r) => (r.data ?? []) as HistRow[]);
+
+  const [dayHist, weekHist, monthHist] = await Promise.all([
+    histFor("day", 60),
+    histFor("week", 26),
+    histFor("month", 24),
+  ]);
+
   const fold = (rows: Row[]): PeriodTotals => ({
     total: rows.reduce((a, r) => a + Number(r.total), 0),
     claimed: rows.reduce((a, r) => a + Number(r.claimed_total), 0),
@@ -859,12 +898,38 @@ export async function getWagerPeriods(): Promise<WagerPeriods> {
   const prettyUtc = (d: Date, opts: Intl.DateTimeFormatOptions) =>
     new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: "UTC" }).format(d);
 
+  const point = (grain: HistoryGrain) => (r: HistRow): HistoryPoint => {
+    const d = new Date(String(r.period_start).slice(0, 10) + "T00:00:00Z");
+    const label =
+      grain === "month"
+        ? prettyUtc(d, { month: "short", year: "numeric" })
+        : grain === "week"
+          ? "w/c " + prettyUtc(d, { day: "numeric", month: "short" })
+          : prettyUtc(d, { day: "numeric", month: "short" });
+    return {
+      start: String(r.period_start).slice(0, 10),
+      label,
+      total: Number(r.total),
+      wagerers: Number(r.wagerers),
+    };
+  };
+
+  /* Oldest first, because a chart reads left to right. The query returns
+     newest first so that the limit takes the most RECENT n, not the first n. */
+  const series = (rows: HistRow[], grain: HistoryGrain) =>
+    rows.map(point(grain)).reverse();
+
   return {
     all: fold(allRows),
     month: fold(monthRows),
     week: fold(weekRows),
     day: fold(dayRows),
     months,
+    history: {
+      day: series(dayHist, "day"),
+      week: series(weekHist, "week"),
+      month: series(monthHist, "month"),
+    },
     labels: {
       month: prettyUtc(utcMonthStart(now), { month: "long", year: "numeric" }),
       week: `week of ${prettyUtc(utcWeekStart(now), { day: "numeric", month: "short" })}`,

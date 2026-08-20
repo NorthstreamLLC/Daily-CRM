@@ -18,6 +18,7 @@ import { DateRangeWager } from "./DateRangeWager";
 import { ChurnList } from "../../ChurnList";
 import { PeriodPlayers } from "./PeriodPlayers";
 import { AutoSync } from "./AutoSync";
+import { WagerTrend } from "./WagerTrend";
 
 export const dynamic = "force-dynamic";
 
@@ -189,44 +190,14 @@ export default async function WagerPage({
             </div>
           </section>
 
-          {/* Month by month */}
-          {periods.months.length > 0 && (
-            <section className="mb-8">
-              <SectionHeader
-                title="Month by month"
-                count={periods.months.length}
-                hint="Every calendar month on record, UTC. Run the backfill to load history before you started syncing."
-              />
-              <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b-2 border-line-strong bg-sunken">
-                      <Th>Month</Th>
-                      <Th align="right">Wagerers</Th>
-                      <Th align="right">Weighted wager</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {periods.months.map((m, i) => (
-                      <tr
-                        key={m.month}
-                        className={cn(
-                          "border-b border-line last:border-0",
-                          i % 2 === 1 && "bg-sunken/35"
-                        )}
-                      >
-                        <td className="px-4 py-2.5 text-body font-medium text-ink">
-                          {m.label}
-                        </td>
-                        <Td muted>{m.wagerers.toLocaleString()}</Td>
-                        <Td strong>{money(m.total)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
+          {/* Wagered over time */}
+          <section className="mb-8">
+            <SectionHeader
+              title="Wagered over time"
+              hint="Each bar is one whole UTC period, exactly as Roobet reported it. The last bar is still running, so it is drawn faded — a half-finished day is not a drop."
+            />
+            <WagerTrend history={periods.history} />
+          </section>
 
           {/* Per rep */}
           <section className="mb-8">
