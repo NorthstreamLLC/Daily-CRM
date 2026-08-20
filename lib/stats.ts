@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Me } from "@/lib/queries";
+import { onlyDue, type Me } from "@/lib/queries";
 import { startOfDayPlusUtc, startOfDayUtc, ymdInZone } from "@/lib/time";
 import { prettyDate, type DateRange } from "@/lib/ranges";
 
@@ -411,13 +411,20 @@ export async function getLeaderboard(
       return (data ?? []) as { owner_id: string; players: number }[];
     })(),
 
-    // Only the players who could possibly be due - far smaller than the book.
+    /* Only the players who could possibly be due - far smaller than the book.
+
+       Uses onlyDue so this agrees with what each rep actually sees on their
+       Today page. It used to spell the rule out again here, and the two
+       drifted: after Moneyheist's import his own queue said 8 while this
+       column said 224 about him, on the same day, because this copy still
+       counted dead leads with no Roobet username. */
     (async () => {
-      const { data } = await supabase
-        .from("players_enriched")
-        .select("owner_id, last_contact_at, next_followup_at, missing_roobet")
-        .or(`next_followup_at.lte.${nowIso},missing_roobet.is.true`)
-        .limit(200000);
+      const { data } = await onlyDue(
+        supabase
+          .from("players_enriched")
+          .select("owner_id, last_contact_at, next_followup_at, missing_roobet"),
+        nowIso
+      ).limit(200000);
       return data ?? [];
     })(),
   ]);

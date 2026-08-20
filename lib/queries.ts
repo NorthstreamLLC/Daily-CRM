@@ -102,6 +102,33 @@ export const getSetting = cache(async function getSetting(
 });
 
 /**
+ * WHAT COUNTS AS DUE - the one definition.
+ *
+ * This rule was written out twice: once in getDueNow for a rep's own queue,
+ * and again in getLeaderboard for the admin "outstanding" column. They drifted,
+ * as duplicated rules do. After importing Moneyheist's book his Today page
+ * said 8 and the admin overview said 224 about the same rep on the same day,
+ * because only one of the two had learnt to leave dead leads alone.
+ *
+ * Both now call this. If the rule changes, it changes in one place, and the
+ * two numbers cannot disagree again.
+ *
+ * The rule: a player is due if they have never been contacted, or their
+ * follow-up date has arrived, or they still have no Roobet username - and in
+ * every case only if they are not a dead lead, which has its own 30-day
+ * retarget rhythm and its own place in the Book.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function onlyDue<T extends { or: any; eq: any }>(
+  query: T,
+  endTodayIso: string
+): T {
+  return query
+    .eq("is_dead", false)
+    .or(`last_contact_at.is.null,next_followup_at.lte.${endTodayIso},missing_roobet.is.true`);
+}
+
+/**
  * TODAY'S QUEUE.
  *
  * Someone is due if any of these is true:
@@ -114,43 +141,30 @@ export const getSetting = cache(async function getSetting(
  * Without that last part a finished task stays on the list and ticking it
  * appears to do nothing - which is exactly how the spreadsheet behaved.
  *
- * Ordering puts live leads above revived dead leads. A dead lead hitting its
- * 30-day retarget has the longest gap since contact, so on a plain
- * longest-neglected sort it would lead the queue every morning and bury the
- * work that actually earns.
+ * Dead leads are excluded - see onlyDue. They retarget on their own 30-day
+ * cycle and are worked from the Book, because a book that is 95% dead leads
+ * would otherwise be a queue nobody could face.
  */
 export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
   const supabase = createClient();
   const endToday = endOfDayUtc(me.timezone).toISOString();
   const startToday = startOfDayUtc(me.timezone).toISOString();
 
-  const { data, error } = await supabase
-    .from("players_enriched")
-    .select(PLAYER_FIELDS)
-    /* Scope explicitly rather than leaning on Row Level Security.
-       RLS says "your own players, OR everything if you are an admin" - which
-       is right for permission but wrong for a personal queue: it made an
-       admin's Today show every rep's work as though it were theirs. Worse,
-       ticking one off would have logged the completion against the admin and
-       moved that player's follow-up date. */
-    .eq("owner_id", ownerId || me.id)
-    /* Dead leads are not today's work.
-
-       They have their own rhythm - a 30-day retarget - and their own home in
-       the Book, behind the "dead" filter, with a count on this page linking
-       to it. Leaving them in the queue as well meant the page contradicted
-       itself: 233 rows in the list AND "233 dead leads waiting" underneath.
-
-       This is not cosmetic. Moneyheist's book is 233 dead leads out of 242,
-       and 233 of them have no Roobet username - which the rule below treats
-       as "surface every day until it is filled". His queue would have been
-       233 items every morning, permanently, and chasing a Roobet username
-       from someone already written off is not work anyone should be given. */
-    .eq("is_dead", false)
-    .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
-    .or(
-      `last_contact_at.is.null,next_followup_at.lte.${endToday},missing_roobet.is.true`
-    )
+  const { data, error } = await onlyDue(
+    supabase
+      .from("players_enriched")
+      .select(PLAYER_FIELDS)
+      /* Scope explicitly rather than leaning on Row Level Security.
+         RLS says "your own players, OR everything if you are an admin" -
+         which is right for permission but wrong for a personal queue: it made
+         an admin's Today show every rep's work as though it were theirs.
+         Worse, ticking one off would have logged the completion against the
+         admin and moved that player's follow-up date. */
+      .eq("owner_id", ownerId || me.id)
+      // Not already worked today - otherwise ticking one off does nothing.
+      .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`),
+    endToday
+  )
     .order("last_contact_at", { ascending: true, nullsFirst: true })
     .limit(500);
 
