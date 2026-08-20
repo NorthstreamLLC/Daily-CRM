@@ -1240,11 +1240,14 @@ export async function undoImport(batchId: string): Promise<AdminState> {
 
   const { data: batch } = await supabase
     .from("import_batches")
-    .select("id, created_at")
+    .select("id, created_at, undone_at")
     .eq("id", batchId)
     .maybeSingle();
 
   if (!batch) return { error: "That import no longer exists." };
+  if (batch.undone_at) {
+    return { error: "That import was already undone - its players are gone." };
+  }
 
   const since = batch.created_at as string;
 
@@ -1312,7 +1315,16 @@ export async function undoImport(batchId: string): Promise<AdminState> {
   const { error } = await supabase.from("players").delete().eq("import_batch_id", batchId);
   if (error) return { error: error.message };
 
-  await audit(me.id, "undo_import", null, { batchId });
+  /* Mark the batch, do not delete it. "This ran and was taken back" is a
+     different fact from "this never happened", and only one is true. */
+  await supabase
+    .from("import_batches")
+    .update({ undone_at: new Date().toISOString(), undone_by: me.id })
+    .eq("id", batchId);
+
+  await audit(me.id, "undo_import", null, { batchId, players: playerIds.length });
   refresh();
-  return { message: "Import removed." };
+  return {
+    message: `Import removed — ${playerIds.length.toLocaleString()} players deleted.`,
+  };
 }

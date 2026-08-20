@@ -260,6 +260,8 @@ export type ImportBatch = {
   created_at: string;
   target_user_id: string | null;
   targetName: string;
+  /** Set once the import has been reversed. Null while its players are here. */
+  undone_at: string | null;
 };
 
 export async function getImportHistory(): Promise<ImportBatch[]> {
@@ -268,7 +270,7 @@ export async function getImportHistory(): Promise<ImportBatch[]> {
     supabase
       .from("import_batches")
       .select(
-        "id, filename, rows_total, rows_imported, rows_rejected, rejections, created_at, target_user_id"
+        "id, filename, rows_total, rows_imported, rows_rejected, rejections, created_at, target_user_id, undone_at"
       )
       .order("created_at", { ascending: false })
       .limit(25),

@@ -86,7 +86,12 @@ export default async function ImportPage() {
         ) : (
           <div className="space-y-2">
             {history.map((batch) => (
-              <Card key={batch.id}>
+              /* An undone import stays in the list, greyed, saying so.
+                 Removing the row would claim it never happened; leaving it
+                 unchanged claimed its players were still here. Neither is
+                 true, and this log is the only record of where a book's
+                 players came from. */
+              <Card key={batch.id} className={cn(batch.undone_at && "opacity-60")}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-body font-medium text-ink">
@@ -97,9 +102,15 @@ export default async function ImportPage() {
                       {formatDateTime(batch.created_at, me.timezone)}
                     </p>
                     <p className="mt-1.5 flex flex-wrap gap-x-3 text-small">
-                      <span className="text-success">
-                        {batch.rows_imported.toLocaleString()} imported
-                      </span>
+                      {batch.undone_at ? (
+                        <span className="text-ink-subtle line-through">
+                          {batch.rows_imported.toLocaleString()} imported
+                        </span>
+                      ) : (
+                        <span className="text-success">
+                          {batch.rows_imported.toLocaleString()} imported
+                        </span>
+                      )}
                       {batch.rows_rejected > 0 && (
                         <span className="text-warning">
                           {batch.rows_rejected.toLocaleString()} skipped
@@ -111,8 +122,15 @@ export default async function ImportPage() {
                     </p>
                   </div>
 
-                  {batch.rows_imported > 0 && (
-                    <UndoImport batchId={batch.id} count={batch.rows_imported} />
+                  {batch.undone_at ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-sunken
+                                     px-2.5 py-1 text-caption font-medium text-ink-muted">
+                      Undone {formatDateTime(batch.undone_at, me.timezone)}
+                    </span>
+                  ) : (
+                    batch.rows_imported > 0 && (
+                      <UndoImport batchId={batch.id} count={batch.rows_imported} />
+                    )
                   )}
                 </div>
 
