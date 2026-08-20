@@ -60,7 +60,35 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
           Nothing is written yet. This reads the file and tells you what it found.
         </p>
 
-        <form action={previewAction} className="mt-3">
+        <form action={previewAction} className="mt-3 space-y-3">
+          {/* The destination is chosen HERE, not in step 2.
+
+              Without it the check could not look at the book it was importing
+              into, so it happily reported "250 will import" and then the
+              import silently skipped the forty who were already there. A dry
+              run that does not know the destination cannot tell you what will
+              happen - which is the entire job of a dry run. */}
+          <Field
+            label="Import into whose book?"
+            htmlFor="preview_target"
+            hint="Chosen first so the check can compare the file against this book and everyone else's."
+          >
+            <Select
+              id="preview_target"
+              name="target_user_id"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              required
+            >
+              <option value="">Choose a person…</option>
+              {active.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.code}) — {u.bookSize.toLocaleString()} already
+                </option>
+              ))}
+            </Select>
+          </Field>
+
           <Field
             label="CSV file"
             htmlFor="file"
@@ -83,7 +111,7 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
           </Field>
 
           <div className="mt-3">
-            <CheckButton label="Check file" />
+            <CheckButton label="Check file" disabled={!target} />
           </div>
         </form>
 
@@ -204,8 +232,12 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
       <Card className={cn(!preview?.ok && "opacity-60")}>
         <h3 className="text-h3 font-semibold text-ink">2. Import it</h3>
         <p className="mt-1 text-small text-ink-muted">
-          Choose the file again — browsers don&rsquo;t let a page hold on to it between
-          steps — then pick whose book it goes into.
+          Choose the same file again — browsers don&rsquo;t let a page hold on to it
+          between steps. It goes into{" "}
+          <span className="font-medium text-ink">
+            {active.find((u) => u.id === target)?.name ?? "the book you picked above"}
+          </span>
+          &rsquo;s book.
         </p>
 
         <form action={runAction} className="mt-3 space-y-3">
@@ -225,27 +257,10 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
             />
           </Field>
 
-          <Field
-            label="Import into whose book?"
-            htmlFor="target_user_id"
-            hint="Every imported player is owned by this person and appears in their queue."
-          >
-            <Select
-              id="target_user_id"
-              name="target_user_id"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              required
-              disabled={!preview?.ok}
-            >
-              <option value="">Choose a person…</option>
-              {active.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.code}) — {u.bookSize.toLocaleString()} already
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {/* Carried from step 1 rather than asked twice. Two selects for the
+              same thing is two chances for them to disagree, and the one that
+              was checked would not be the one that was written. */}
+          <input type="hidden" name="target_user_id" value={target} />
 
           <CheckButton
             label={

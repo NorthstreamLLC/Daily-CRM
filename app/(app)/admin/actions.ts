@@ -592,6 +592,12 @@ export async function previewImport(
     return { ...empty, error: (e as Error).message };
   }
 
+  /* The destination is needed to check anything useful, so it is required
+     here and not only at the point of writing. */
+  if (!String(formData.get("target_user_id") ?? "")) {
+    return { ...empty, error: "Choose whose book this is going into first." };
+  }
+
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
     return { ...empty, error: "Choose a CSV file." };
@@ -628,17 +634,62 @@ export async function previewImport(
     };
   }
 
+  const targetUserId = String(formData.get("target_user_id") ?? "");
+
   const supabase = createClient();
-  const [{ data: statuses }, { data: sources }] = await Promise.all([
+  const [{ data: statuses }, { data: sources }, { data: everyone }] = await Promise.all([
     supabase.from("statuses").select("name"),
     supabase.from("sources").select("name"),
+    /* EVERY player already in the system, not just the target's book.
+
+       Two different collisions matter and they have different consequences:
+
+         same handle, same book      - the row is a no-op, it gets skipped
+         same Roobet username, ANY   - the wager is attributed to whichever
+         book                          row was updated most recently, which is
+                                       arbitrary, and commission is paid on it
+
+       The second one is the expensive one and nothing was looking for it.
+       Importing thirteen books one at a time, a player who appears in two
+       reps' sheets is not a hypothetical. */
+    supabase
+      .from("players")
+      .select("handle, roobet_username, owner_id")
+      .limit(100000),
   ]);
 
   const validStatuses = new Set((statuses ?? []).map((s) => s.name as string));
   const validSources = new Set((sources ?? []).map((s) => s.name as string));
 
+  const { data: team } = await supabase.from("users").select("id, name");
+  const nameOf = new Map((team ?? []).map((u) => [u.id as string, u.name as string]));
+
+  const inTargetBook = new Set<string>();
+  const handleElsewhere = new Map<string, string>();
+  const roobetTaken = new Map<string, string>();
+
+  for (const p of everyone ?? []) {
+    const owner = p.owner_id as string;
+    const h = ((p.handle as string) ?? "").trim().toLowerCase();
+    const r = ((p.roobet_username as string) ?? "").trim().toLowerCase();
+
+    if (h) {
+      if (owner === targetUserId) inTargetBook.add(h);
+      else if (!handleElsewhere.has(h)) {
+        handleElsewhere.set(h, nameOf.get(owner) ?? "another rep");
+      }
+    }
+    if (r && !roobetTaken.has(r)) {
+      roobetTaken.set(r, nameOf.get(owner) ?? "another rep");
+    }
+  }
+
   const problems: ImportPreview["problems"] = [];
   const seen = new Set<string>();
+  /* Two rows in the SAME file sharing a Roobet username is the same
+     misattribution as sharing one with another book, and an old sheet
+     copy-pasted from another old sheet is exactly where it comes from. */
+  const seenRoobet = new Map<string, string>();
   const sample: Record<string, string>[] = [];
   let willImport = 0;
 
@@ -659,6 +710,60 @@ export async function previewImport(
       return;
     }
     seen.add(key);
+
+    /* Already in the destination book - the import will skip this row.
+       Reported here so the count in the preview is the count you get. */
+    if (inTargetBook.has(key)) {
+      problems.push({
+        row: rowNumber,
+        reason: "Already in this book — will be skipped",
+        handle,
+      });
+      return;
+    }
+
+    // Same person, someone else's book. Imported, but somebody should look.
+    const elsewhere = handleElsewhere.get(key);
+    if (elsewhere) {
+      problems.push({
+        row: rowNumber,
+        reason: `Also in ${elsewhere}'s book — two reps have this player`,
+        handle,
+      });
+    }
+
+    /* THE EXPENSIVE ONE.
+
+       Two players sharing a Roobet username means the wager report attributes
+       the money to whichever row was updated last. That is arbitrary, and
+       commission is paid from it. */
+    const roobet = get("roobet_username").trim().toLowerCase();
+    if (roobet) {
+      const twin = seenRoobet.get(roobet);
+      if (twin) {
+        problems.push({
+          row: rowNumber,
+          reason:
+            `Roobet username "${get("roobet_username")}" is also on "${twin}" ` +
+            `earlier in this file — the same person twice under two handles.`,
+          handle,
+        });
+      } else {
+        seenRoobet.set(roobet, handle);
+      }
+
+      const taken = roobetTaken.get(roobet);
+      if (taken) {
+        problems.push({
+          row: rowNumber,
+          reason:
+            `Roobet username "${get("roobet_username")}" is already on a player in ` +
+            `${taken}'s book — their wager would be counted against whichever ` +
+            `record was touched most recently. Fix before importing.`,
+          handle,
+        });
+      }
+    }
 
     const status = get("status");
     const resolved = resolveStatus(status, validStatuses);
