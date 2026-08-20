@@ -134,11 +134,23 @@ export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
        ticking one off would have logged the completion against the admin and
        moved that player's follow-up date. */
     .eq("owner_id", ownerId || me.id)
+    /* Dead leads are not today's work.
+
+       They have their own rhythm - a 30-day retarget - and their own home in
+       the Book, behind the "dead" filter, with a count on this page linking
+       to it. Leaving them in the queue as well meant the page contradicted
+       itself: 233 rows in the list AND "233 dead leads waiting" underneath.
+
+       This is not cosmetic. Moneyheist's book is 233 dead leads out of 242,
+       and 233 of them have no Roobet username - which the rule below treats
+       as "surface every day until it is filled". His queue would have been
+       233 items every morning, permanently, and chasing a Roobet username
+       from someone already written off is not work anyone should be given. */
+    .eq("is_dead", false)
     .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
     .or(
       `last_contact_at.is.null,next_followup_at.lte.${endToday},missing_roobet.is.true`
     )
-    .order("is_dead", { ascending: true })
     .order("last_contact_at", { ascending: true, nullsFirst: true })
     .limit(500);
 
@@ -219,13 +231,23 @@ export async function countComingUp(
  * which is what a badge needs. Fetching 500 rows to display the number 500 is
  * the kind of thing that is free at 20 players and expensive at 1,000.
  */
-export async function countDeadLeads(me: Me, ownerId?: string): Promise<number> {
+export async function countDeadLeads(
+  me: Me,
+  ownerId?: string
+): Promise<number> {
   const supabase = createClient();
+  /* Only the ones whose retarget has actually come round.
+
+     The raw total is a number nobody can act on - Moneyheist has 233, and
+     "233 dead leads waiting for a retarget" is true on the day of the import
+     and still true in six months. What a rep can act on is the dozen whose
+     thirty days are up today, which is a morning's work rather than a wall. */
   const { count } = await supabase
     .from("players_enriched")
     .select("id", { count: "exact", head: true })
     .eq("owner_id", ownerId || me.id)
-    .eq("is_dead", true);
+    .eq("is_dead", true)
+    .lte("next_followup_at", endOfDayUtc(me.timezone).toISOString());
   return count ?? 0;
 }
 

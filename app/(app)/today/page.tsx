@@ -546,7 +546,7 @@ export default async function TodayPage({
       {deadTotal > 0 && (
         <p className="mt-6 text-small text-ink-muted">
           <span className="tabular font-medium text-ink">{deadTotal}</span> dead{" "}
-          {deadTotal === 1 ? "lead" : "leads"} waiting for a retarget.{" "}
+          {deadTotal === 1 ? "lead is" : "leads are"} ready to retarget today.{" "}
           <Link
             href="/book?flag=dead"
             className="font-medium text-accent underline-offset-2 hover:underline"
