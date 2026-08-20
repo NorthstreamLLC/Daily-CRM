@@ -1212,7 +1212,22 @@ export async function deleteWagerSource(sourceId: string): Promise<AdminState> {
   return { message: "Source removed. Its past snapshots are kept." };
 }
 
-/** Undo an import completely, as long as nobody has worked those players yet. */
+/**
+ * Undo an import completely, as long as nobody has worked those players yet.
+ *
+ * "WORKED" MEANS WORKED HERE, SINCE THE IMPORT.
+ *
+ * This used to test `last_contact_at is not null` - which the import itself
+ * fills in, from the sheet. So a book whose players had all been contacted at
+ * some point in the past few months, which is every real book, reported "242
+ * of those players have already been contacted" and refused to undo an import
+ * that was minutes old and had touched nothing.
+ *
+ * The guard was reading imported history as if it were evidence of work. What
+ * it actually wants to know is whether anything has happened to these players
+ * SINCE they arrived: a logged action, a message, or a contact stamped after
+ * the batch ran. Those are the things an undo would destroy.
+ */
 export async function undoImport(batchId: string): Promise<AdminState> {
   let me;
   try {
@@ -1223,15 +1238,57 @@ export async function undoImport(batchId: string): Promise<AdminState> {
 
   const supabase = createClient();
 
-  const { count: worked } = await supabase
-    .from("players")
-    .select("id", { count: "exact", head: true })
-    .eq("import_batch_id", batchId)
-    .not("last_contact_at", "is", null);
+  const { data: batch } = await supabase
+    .from("import_batches")
+    .select("id, created_at")
+    .eq("id", batchId)
+    .maybeSingle();
 
-  if ((worked ?? 0) > 0) {
+  if (!batch) return { error: "That import no longer exists." };
+
+  const since = batch.created_at as string;
+
+  const { data: ids } = await supabase
+    .from("players")
+    .select("id")
+    .eq("import_batch_id", batchId)
+    .limit(100000);
+
+  const playerIds = (ids ?? []).map((p) => p.id as string);
+  if (playerIds.length === 0) return { error: "That import created no players." };
+
+  /* Three ways a player can have been worked since arriving. Any one of them
+     means an undo would destroy something the import did not create. */
+  const [activity, messages, contacted] = await Promise.all([
+    supabase
+      .from("activity_log")
+      .select("id", { count: "exact", head: true })
+      .in("player_id", playerIds),
+    supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .in("player_id", playerIds),
+    supabase
+      .from("players")
+      .select("id", { count: "exact", head: true })
+      .eq("import_batch_id", batchId)
+      .gt("last_contact_at", since),
+  ]);
+
+  const worked =
+    (activity.count ?? 0) + (messages.count ?? 0) + (contacted.count ?? 0);
+
+  if (worked > 0) {
+    const parts = [
+      (activity.count ?? 0) > 0 && `${activity.count} logged action${activity.count === 1 ? "" : "s"}`,
+      (messages.count ?? 0) > 0 && `${messages.count} message${messages.count === 1 ? "" : "s"}`,
+      (contacted.count ?? 0) > 0 && `${contacted.count} contacted since`,
+    ].filter(Boolean);
+
     return {
-      error: `${worked} of those players have already been contacted. Remove them individually rather than undoing the whole import.`,
+      error:
+        `Real work has happened on these players since the import - ${parts.join(", ")}. ` +
+        `Undoing would delete it too, so remove them individually instead.`,
     };
   }
 
