@@ -1259,11 +1259,28 @@ export async function undoImport(batchId: string): Promise<AdminState> {
 
   /* Three ways a player can have been worked since arriving. Any one of them
      means an undo would destroy something the import did not create. */
-  const [activity, messages, contacted] = await Promise.all([
+  const [activity, automatic, messages, contacted] = await Promise.all([
     supabase
       .from("activity_log")
       .select("id", { count: "exact", head: true })
       .in("player_id", playerIds),
+    /* The wager sync's own entries, which do not count as work.
+
+       When a player starts wagering the sync advances them to Active and logs
+       it with automatic: true. That is a machine noticing something, and it is
+       reproducible - undo, re-import, and the next sync redoes it inside half
+       an hour. Counting it blocked an undo on a book where nobody had done
+       anything at all, which is the opposite of what the guard is for.
+
+       Counted and subtracted rather than filtered out in the query above,
+       because `metadata->>automatic != 'true'` is NULL for every row that has
+       no such key - so the obvious filter would have silently discarded every
+       genuinely human action instead. */
+    supabase
+      .from("activity_log")
+      .select("id", { count: "exact", head: true })
+      .in("player_id", playerIds)
+      .eq("metadata->>automatic", "true"),
     supabase
       .from("messages")
       .select("id", { count: "exact", head: true })
@@ -1275,12 +1292,12 @@ export async function undoImport(batchId: string): Promise<AdminState> {
       .gt("last_contact_at", since),
   ]);
 
-  const worked =
-    (activity.count ?? 0) + (messages.count ?? 0) + (contacted.count ?? 0);
+  const byHand = Math.max(0, (activity.count ?? 0) - (automatic.count ?? 0));
+  const worked = byHand + (messages.count ?? 0) + (contacted.count ?? 0);
 
   if (worked > 0) {
     const parts = [
-      (activity.count ?? 0) > 0 && `${activity.count} logged action${activity.count === 1 ? "" : "s"}`,
+      byHand > 0 && `${byHand} logged action${byHand === 1 ? "" : "s"}`,
       (messages.count ?? 0) > 0 && `${messages.count} message${messages.count === 1 ? "" : "s"}`,
       (contacted.count ?? 0) > 0 && `${contacted.count} contacted since`,
     ].filter(Boolean);
