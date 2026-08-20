@@ -69,6 +69,46 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     );
   }
 
+  /* DEACTIVATED - a leaver, or someone fired.
+
+     Deactivating already bans the Supabase login, which is the real lock. But
+     that ban is applied with the service-role key, and the service-role key is
+     optional: without it the ban silently does not happen, and until now
+     nothing else checked. A fired rep would have been hidden from every
+     dropdown while still able to sign in and read their whole book.
+
+     So the app checks too. Two independent locks, and the one that does not
+     depend on configuration is this one.
+
+     Rendered rather than redirected, for the same reason as the branch above:
+     the middleware sees a valid session and would bounce them straight back
+     into an infinite loop. */
+  if (!me.active) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
+        <div className="w-full max-w-md rounded-card border border-line-strong bg-surface p-6 shadow-card">
+          <h1 className="text-h2 font-semibold text-ink">Access removed</h1>
+          <p className="mt-2 text-body text-ink-muted">
+            This account has been deactivated, so it can no longer open the CRM.
+          </p>
+          <p className="mt-3 text-small text-ink-muted">
+            If you think that is a mistake, speak to an admin - they can
+            reactivate it under Admin &rarr; People.
+          </p>
+          <form action={signOut} className="mt-5">
+            <button
+              type="submit"
+              className="inline-flex h-9 items-center rounded-control bg-accent px-3.5
+                         text-body font-medium text-white btn-on-accent hover:bg-accent-hover"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   const items: NavItem[] = [
     { href: "/today", label: "Today", icon: "today" },
     { href: "/calendar", label: "Calendar", icon: "calendar" },

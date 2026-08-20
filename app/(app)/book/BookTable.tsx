@@ -18,7 +18,7 @@ import {
   MessageSquare,
   X,
 } from "@/components/icons";
-import { bulkAssignOwner, bulkChangeStatus } from "../actions";
+import { bulkAssignOwner, bulkChangeStatus, deletePlayers } from "../actions";
 import { DueLabel, PlayerDetail, StatusSelect, formatDate, type StatusOption } from "../shared";
 
 type Column = {
@@ -39,6 +39,22 @@ const COLUMNS: Column[] = [
 
 const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+/**
+ * Turn an action's result into something the banner can colour correctly.
+ *
+ * Every bulk action returns the same shape, so the tone is known rather than
+ * inferred. Before this, the banner was hard-coded green and reported
+ * "Only admins can delete players." as though it had worked.
+ */
+function toBanner(
+  res: { error?: string; message?: string } | null
+): { text: string; failed: boolean } | null {
+  if (!res) return null;
+  if (res.error) return { text: res.error, failed: true };
+  if (res.message) return { text: res.message, failed: false };
+  return null;
+}
 
 /**
  * THE BOOK.
@@ -88,7 +104,15 @@ export function BookTable({
   const [bulkStatus, setBulkStatus] = useState("");
   const [assignTo, setAssignTo] = useState("");
   const [bulkPending, startBulk] = useTransition();
-  const [bulkResult, setBulkResult] = useState<string | null>(null);
+  /* The action already knows whether it failed - it returns `error` or
+     `message`. Keeping the tone alongside the text means the banner never has
+     to guess from the wording. */
+  const [bulkResult, setBulkResult] =
+    useState<{ text: string; failed: boolean } | null>(null);
+  /* Delete asks twice. The first click arms it, the second does it - so a
+     mis-click on a destructive control costs nothing, and the confirmation
+     names the number rather than asking a vague "are you sure?". */
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const sort = (params.get("sort") ?? "last_contact_at") as BookSort;
   const dir = (params.get("dir") ?? "desc") as "asc" | "desc";
@@ -131,7 +155,7 @@ export function BookTable({
     if (!bulkStatus || selected.size === 0) return;
     startBulk(async () => {
       const res = await bulkChangeStatus(Array.from(selected), bulkStatus);
-      setBulkResult(res?.error ?? res?.message ?? null);
+      setBulkResult(toBanner(res));
       setSelected(new Set());
       setBulkStatus("");
       router.refresh();
@@ -142,11 +166,30 @@ export function BookTable({
     if (!assignTo || selected.size === 0) return;
     startBulk(async () => {
       const res = await bulkAssignOwner(Array.from(selected), assignTo);
-      setBulkResult(res?.error ?? res?.message ?? null);
+      setBulkResult(toBanner(res));
       setSelected(new Set());
       setAssignTo("");
       router.refresh();
     });
+  }
+
+  function applyDelete() {
+    if (selected.size === 0) return;
+    startBulk(async () => {
+      const res = await deletePlayers(Array.from(selected));
+      setBulkResult(toBanner(res));
+      setSelected(new Set());
+      setConfirmDelete(false);
+      router.refresh();
+    });
+  }
+
+  /* Clearing the selection must disarm the delete too. Otherwise the armed
+     state outlives what it was armed against, and the next selection inherits
+     a primed destructive button. */
+  function clearSelection() {
+    setSelected(new Set());
+    setConfirmDelete(false);
   }
 
   const firstOnPage = (page - 1) * pageSize + 1;
@@ -216,9 +259,52 @@ export function BookTable({
             </>
           )}
 
+          {/* Delete - admins only, and permanent.
+              Sits behind the same `team` gate as Assign because both are
+              admin-only, and it is deliberately the last control in the bar:
+              the destructive one should not be next to the one people use all
+              day. */}
+          {team && team.length > 0 && (
+            <>
+              <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
+              {confirmDelete ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-small font-medium text-danger">
+                    Delete {selected.size} permanently? Their messages and wager
+                    history go too.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={bulkPending}
+                    onClick={applyDelete}
+                  >
+                    Yes, delete
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setConfirmDelete(false)}
+                  >
+                    Cancel
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={bulkPending}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  Delete
+                </Button>
+              )}
+            </>
+          )}
+
           <button
             type="button"
-            onClick={() => setSelected(new Set())}
+            onClick={clearSelection}
             className="ml-auto inline-flex items-center gap-1 rounded-control px-2 py-1
                        text-small text-accent hover:bg-white/60"
           >
@@ -227,12 +313,20 @@ export function BookTable({
         </div>
       )}
 
+      {/* One banner for every bulk action. It used to be unconditionally green,
+          which meant "Only admins can delete players." was reported as a
+          success - so failures are told apart here rather than assumed away. */}
       {bulkResult && (
         <p
           role="status"
-          className="mb-3 rounded-control bg-success-soft px-3 py-2 text-small text-success"
+          className={cn(
+            "mb-3 rounded-control px-3 py-2 text-small",
+            bulkResult.failed
+              ? "bg-danger-soft text-danger"
+              : "bg-success-soft text-success"
+          )}
         >
-          {bulkResult}
+          {bulkResult.text}
         </p>
       )}
 

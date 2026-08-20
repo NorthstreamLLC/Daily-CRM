@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { TeamMember } from "@/lib/admin";
 import { Badge, Button, Field, Input, Select, Notice, cn } from "@/components/ui";
 import { ChevronDown, Shield } from "@/components/icons";
-import { reassignBook, sendPasswordReset, setTargets, updateUser } from "../actions";
+import { deleteUser, reassignBook, sendPasswordReset, setTargets, updateUser } from "../actions";
 
 /**
  * One person, with everything about them editable in place.
@@ -29,7 +29,12 @@ export function UserRow({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const [result, setResult] = useState<{ error?: string; message?: string } | null>(null);
+  /* `warning` matters as much as the other two: deactivating someone without
+     the service-role key succeeds AND leaves their login working, and that is
+     reported as a warning. Leaving it off this type meant the one message an
+     admin most needed to read was the one that never appeared. */
+  const [result, setResult] =
+    useState<{ error?: string; message?: string; warning?: string } | null>(null);
 
   const [name, setName] = useState(user.name);
   const [timezone, setTimezone] = useState(user.timezone);
@@ -41,9 +46,15 @@ export function UserRow({
   const [outreach, setOutreach] = useState(String(user.targets.outreach));
 
   const [reassignTo, setReassignTo] = useState("");
+  /* Delete arms on the first click and fires on the second - the same
+     two-step the Book uses, so a destructive control behaves the same way
+     everywhere. */
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const router = useRouter();
 
-  function run(fn: () => Promise<{ error?: string; message?: string } | null>) {
+  function run(
+    fn: () => Promise<{ error?: string; message?: string; warning?: string } | null>
+  ) {
     start(async () => {
       const res = await fn();
       setResult(res);
@@ -262,12 +273,61 @@ export function UserRow({
                   {user.active ? "Deactivate" : "Reactivate"}
                 </Button>
               )}
+              {/* Delete - only offered for an account with an empty book,
+                  which in practice means a test account. The server counts
+                  their activity and messages too and refuses if either exists,
+                  so this is a shortcut past the obvious case rather than the
+                  actual guard. */}
+              {!isMe && user.bookSize === 0 && (
+                confirmDelete ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-small font-medium text-danger">
+                      Delete {user.name} for good?
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      loading={pending}
+                      onClick={() => {
+                        setConfirmDelete(false);
+                        run(() => deleteUser(user.id));
+                      }}
+                    >
+                      Yes, delete
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={pending}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    Delete
+                  </Button>
+                )
+              )}
             </div>
             <p className="mt-2 text-caption text-ink-subtle">
               Deactivating blocks sign-in and hides them from the app. Their players,
               history and past numbers stay exactly as they are — nothing is deleted.
               {isMe && " You can't change your own access."}
             </p>
+            {!isMe && user.bookSize === 0 && (
+              <p className="mt-1 text-caption text-ink-subtle">
+                Delete removes the account and its login permanently. It only works
+                while they have no players, no logged actions and no messages — once
+                someone has done real work, deactivating is the only option, because
+                commission is argued from that history.
+              </p>
+            )}
           </div>
 
           {/* Reassign */}
@@ -308,6 +368,7 @@ export function UserRow({
           )}
 
           {result?.error && <Notice tone="danger">{result.error}</Notice>}
+          {result?.warning && <Notice tone="warning">{result.warning}</Notice>}
           {result?.message && <Notice tone="success">{result.message}</Notice>}
         </div>
       )}

@@ -34,6 +34,8 @@ export type Me = {
   role: "user" | "admin";
   timezone: string;
   default_source: string | null;
+  /** False once an admin deactivates them - a leaver, or someone fired. */
+  active: boolean;
 };
 
 const PLAYER_FIELDS =
@@ -79,7 +81,7 @@ export const getMe = cache(async function getMe(): Promise<Me | null> {
 
   const { data } = await supabase
     .from("users")
-    .select("id, name, code, role, timezone, default_source")
+    .select("id, name, code, role, timezone, default_source, active")
     .eq("id", userId)
     .single();
 

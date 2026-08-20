@@ -192,7 +192,131 @@ export async function updateUser(
 
   await audit(me.id, "update_user", userId, patch as Record<string, unknown>);
   refresh();
+
+  /* Say so when the login was NOT actually blocked.
+
+     Without the service-role key the ban above is skipped, and this used to
+     report a plain "Saved." - so deactivating someone who had just been fired
+     looked identical whether or not the thing that matters had happened. The
+     app now refuses them at the door regardless (see the layout), but an admin
+     locking someone out deserves to know which locks turned. */
+  if (patch.active === false && !admin) {
+    return {
+      warning:
+        "Deactivated, and the CRM will refuse them. Their Supabase login was " +
+        "NOT disabled though - that needs SUPABASE_SERVICE_ROLE_KEY set in " +
+        "Vercel. Worth fixing if this person left on bad terms.",
+    };
+  }
+
   return { message: "Saved." };
+}
+
+/**
+ * DELETE AN ACCOUNT THAT NEVER DID ANYTHING.
+ *
+ * This is for test accounts, and only test accounts. If the person has a
+ * single player, a single logged action or a single message, it refuses and
+ * tells you to reassign and deactivate instead.
+ *
+ * WHY IT REFUSES RATHER THAN CASCADES
+ *   Somebody leaving - even being fired - is not a reason to erase them. Their
+ *   activity log is who contacted which player and when, and commission is
+ *   argued from it. Deleting a departed rep would silently rewrite the history
+ *   of players who are still in somebody's book.
+ *
+ *   The database already takes this position: players.owner_id,
+ *   activity_log.user_id and messages.user_id are all `on delete restrict`, so
+ *   Postgres would refuse anyway. This check exists to refuse in a sentence
+ *   that explains itself, rather than a foreign key violation.
+ *
+ * The correct flow for a leaver is the one already on this page:
+ *   1. Move their book to someone else
+ *   2. Deactivate them - which bans the login and locks the CRM
+ */
+export async function deleteUser(userId: string): Promise<AdminState> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  if (userId === me.id) return { error: "You can't delete your own account." };
+
+  const supabase = createClient();
+
+  const { data: target } = await supabase
+    .from("users")
+    .select("id, name, email")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!target) return { error: "That account no longer exists." };
+
+  /* Count everything that would be orphaned, in one round trip. head:true asks
+     for the count without shipping any rows. */
+  const [players, activity, messages] = await Promise.all([
+    supabase.from("players").select("id", { count: "exact", head: true }).eq("owner_id", userId),
+    supabase.from("activity_log").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    supabase.from("messages").select("id", { count: "exact", head: true }).eq("user_id", userId),
+  ]);
+
+  const playerCount = players.count ?? 0;
+  const activityCount = activity.count ?? 0;
+  const messageCount = messages.count ?? 0;
+
+  if (playerCount > 0 || activityCount > 0 || messageCount > 0) {
+    const parts = [
+      playerCount > 0 && `${playerCount} player${playerCount === 1 ? "" : "s"}`,
+      activityCount > 0 && `${activityCount} logged action${activityCount === 1 ? "" : "s"}`,
+      messageCount > 0 && `${messageCount} message${messageCount === 1 ? "" : "s"}`,
+    ].filter(Boolean);
+
+    return {
+      error:
+        `${target.name} has ${parts.join(", ")} - deleting them would take that ` +
+        `history with it, and commission is argued from it. Move their book to ` +
+        `someone else, then Deactivate: that bans the login and locks them out ` +
+        `of the CRM, and keeps the record of what they did.`,
+    };
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    return {
+      error:
+        "Deleting an account needs SUPABASE_SERVICE_ROLE_KEY set in Vercel - " +
+        "without it the profile would go and the login would linger. " +
+        "Deactivate instead, or add the key and redeploy.",
+    };
+  }
+
+  /* Delete the LOGIN, and let the database remove the profile.
+
+     public.users.id is `references auth.users(id) on delete cascade`, so this
+     one call takes both. Deleting the profile first and the login second would
+     be two operations that can half-fail, and the half-failed state is the bad
+     one: a login with no profile can still sign in and reach the app.
+
+     One call, one outcome. */
+  const { error: authError } = await admin.auth.admin.deleteUser(userId);
+  if (authError) {
+    return {
+      error:
+        `Could not delete ${target.name}: ${authError.message}. Nothing was ` +
+        `changed - they are still here and can still sign in.`,
+    };
+  }
+
+  await audit(me.id, "delete_user", null, {
+    deleted_id: userId,
+    name: target.name,
+    email: (target as { email?: string }).email ?? null,
+  });
+  refresh();
+
+  return { message: `${target.name} deleted.` };
 }
 
 /**

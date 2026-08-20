@@ -532,6 +532,83 @@ export async function bulkAssignOwner(
   return { message: `${count ?? playerIds.length} players moved to ${target.name}.` };
 }
 
+/* ------------------------------------------------------------ Delete players */
+
+/**
+ * REMOVE PLAYERS FOR GOOD - admin only.
+ *
+ * This exists for test rows and genuine duplicates, not for tidying. It is
+ * permanent: the schema cascades their messages and their wager readings, and
+ * detaches their activity log. There is no undo.
+ *
+ * WHY ADMIN ONLY, WHEN A REP OWNS THEIR OWN BOOK
+ *   Commission is paid off what is in here. A rep who could delete a player
+ *   could delete the evidence of a player - either their own mistake, or
+ *   somebody else's success. Reassigning already goes through an admin for
+ *   exactly that reason, and destroying a row is the more serious act.
+ *
+ * WHY THE HANDLES GO INTO THE AUDIT ROW
+ *   After the delete there is nothing left to name. Recording what was removed
+ *   at the moment of removal is the only chance to answer "where did they go?"
+ *   later, and that question does get asked.
+ */
+export async function deletePlayers(playerIds: string[]): Promise<ActionState> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+  if (me.role !== "admin") return { error: "Only admins can delete players." };
+  if (playerIds.length === 0) return { error: "Nothing selected." };
+  if (playerIds.length > 200) {
+    return { error: "Delete 200 or fewer at a time - this cannot be undone." };
+  }
+
+  const supabase = createClient();
+
+  /* Read them BEFORE deleting. Doing it after would name nothing, and doing it
+     as part of the delete would not survive a partial failure. */
+  const { data: doomed } = await supabase
+    .from("players")
+    .select("id, handle, reference, roobet_username, owner_id, status")
+    .in("id", playerIds);
+
+  if (!doomed || doomed.length === 0) {
+    return { error: "Those players no longer exist." };
+  }
+
+  const { error, count } = await supabase
+    .from("players")
+    .delete({ count: "exact" })
+    .in("id", playerIds);
+
+  if (error) return { error: error.message };
+
+  await supabase.from("admin_audit").insert({
+    actor_id: me.id,
+    action: "delete_players",
+    detail: {
+      count: count ?? doomed.length,
+      players: doomed.map((p) => ({
+        reference: p.reference,
+        handle: p.handle,
+        roobet_username: p.roobet_username,
+        status: p.status,
+        owner_id: p.owner_id,
+      })),
+    },
+  });
+
+  /* Stats, Today and the Calendar all counted these people a moment ago.
+     The caller must ALSO call router.refresh() - see the note on refresh(). */
+  refresh();
+
+  const n = count ?? doomed.length;
+  return {
+    message:
+      n === 1
+        ? `Deleted ${doomed[0].handle}. That cannot be undone.`
+        : `Deleted ${n} players. That cannot be undone.`,
+  };
+}
+
 /* -------------------------------------------------------------- Add a player */
 
 type HandleMatch = { reference: string; owner_name: string; status: string; is_mine: boolean };
