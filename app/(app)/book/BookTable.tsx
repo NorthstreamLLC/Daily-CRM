@@ -48,11 +48,12 @@ const money = (n: number) =>
  * "Only admins can delete players." as though it had worked.
  */
 function toBanner(
-  res: { error?: string; message?: string } | null
-): { text: string; failed: boolean } | null {
+  res: { error?: string; message?: string; warning?: string } | null
+): { text: string; tone: "danger" | "warning" | "success" } | null {
   if (!res) return null;
-  if (res.error) return { text: res.error, failed: true };
-  if (res.message) return { text: res.message, failed: false };
+  if (res.error) return { text: res.error, tone: "danger" };
+  if (res.warning) return { text: res.warning, tone: "warning" };
+  if (res.message) return { text: res.message, tone: "success" };
   return null;
 }
 
@@ -108,7 +109,7 @@ export function BookTable({
      `message`. Keeping the tone alongside the text means the banner never has
      to guess from the wording. */
   const [bulkResult, setBulkResult] =
-    useState<{ text: string; failed: boolean } | null>(null);
+    useState<{ text: string; tone: "danger" | "warning" | "success" } | null>(null);
   /* Delete asks twice. The first click arms it, the second does it - so a
      mis-click on a destructive control costs nothing, and the confirmation
      names the number rather than asking a vague "are you sure?". */
@@ -233,74 +234,77 @@ export function BookTable({
               them up in their own queue on the players' normal cadence. */}
           {team && team.length > 0 && (
             <>
-              <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
-              <Select
-                value={assignTo}
-                onChange={(e) => setAssignTo(e.target.value)}
-                aria-label="Assign selected players to"
-                className="h-8 w-auto min-w-[160px] text-small"
-              >
-                <option value="">Assign to…</option>
-                {team.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.code})
-                  </option>
-                ))}
-              </Select>
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={!assignTo}
-                loading={bulkPending}
-                onClick={applyAssign}
-              >
-                Assign
-              </Button>
+            <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
+            <Select
+              value={assignTo}
+              onChange={(e) => setAssignTo(e.target.value)}
+              aria-label="Assign selected players to"
+              className="h-8 w-auto min-w-[160px] text-small"
+            >
+              <option value="">Assign to…</option>
+              {team.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.code})
+                </option>
+              ))}
+            </Select>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!assignTo}
+              loading={bulkPending}
+              onClick={applyAssign}
+            >
+              Assign
+            </Button>
             </>
           )}
 
-          {/* Delete - admins only, and permanent.
-              Sits behind the same `team` gate as Assign because both are
-              admin-only, and it is deliberately the last control in the bar:
-              the destructive one should not be next to the one people use all
-              day. */}
-          {team && team.length > 0 && (
-            <>
-              <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
-              {confirmDelete ? (
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="text-small font-medium text-danger">
-                    Delete {selected.size} permanently? Their messages and wager
-                    history go too.
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    loading={bulkPending}
-                    onClick={applyDelete}
-                  >
-                    Yes, delete
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    Cancel
-                  </Button>
+          {/* Delete - everyone, and permanent.
+
+            Not gated on `team` (which is the admin test) because a rep needs
+            to remove their own scammers and duplicates without asking. What
+            they CANNOT remove is a player who has wagered or deposited -
+            enforced by the players_delete policy in migration 026, and
+            explained by the action rather than silently applied.
+
+            Deliberately the last control in the bar: the destructive one
+            should not sit next to the one people use all day. */}
+          <>
+            <span className="hidden h-5 w-px bg-accent/20 sm:block" aria-hidden="true" />
+            {confirmDelete ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-small font-medium text-danger">
+                  Delete {selected.size} permanently? Their messages and wager
+                  history go too.
                 </span>
-              ) : (
                 <Button
                   size="sm"
                   variant="danger"
-                  disabled={bulkPending}
-                  onClick={() => setConfirmDelete(true)}
+                  loading={bulkPending}
+                  onClick={applyDelete}
                 >
-                  Delete
+                  Yes, delete
                 </Button>
-              )}
-            </>
-          )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={bulkPending}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete
+              </Button>
+            )}
+          </>
 
           <button
             type="button"
@@ -321,9 +325,9 @@ export function BookTable({
           role="status"
           className={cn(
             "mb-3 rounded-control px-3 py-2 text-small",
-            bulkResult.failed
-              ? "bg-danger-soft text-danger"
-              : "bg-success-soft text-success"
+            bulkResult.tone === "danger" && "bg-danger-soft text-danger",
+            bulkResult.tone === "warning" && "bg-warning-soft text-warning",
+            bulkResult.tone === "success" && "bg-success-soft text-success"
           )}
         >
           {bulkResult.text}

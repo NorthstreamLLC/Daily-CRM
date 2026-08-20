@@ -535,17 +535,27 @@ export async function bulkAssignOwner(
 /* ------------------------------------------------------------ Delete players */
 
 /**
- * REMOVE PLAYERS FOR GOOD - admin only.
+ * REMOVE PLAYERS FOR GOOD.
  *
- * This exists for test rows and genuine duplicates, not for tidying. It is
+ * This exists for scammers, duplicates and typos - not for tidying. It is
  * permanent: the schema cascades their messages and their wager readings, and
  * detaches their activity log. There is no undo.
  *
- * WHY ADMIN ONLY, WHEN A REP OWNS THEIR OWN BOOK
- *   Commission is paid off what is in here. A rep who could delete a player
- *   could delete the evidence of a player - either their own mistake, or
- *   somebody else's success. Reassigning already goes through an admin for
- *   exactly that reason, and destroying a row is the more serious act.
+ * WHO CAN DELETE WHAT
+ *   Admins   - anything.
+ *   A rep    - their own players, while no wager and no first deposit is
+ *              recorded against them.
+ *
+ *   The line is money, not ownership. A rep who could delete any of their
+ *   players could delete one who had wagered, by mis-click or otherwise, and
+ *   commission is paid off exactly that figure. A scammer, a duplicate and a
+ *   typo have all wagered nothing, so the rule costs a rep nothing they
+ *   actually wanted to do.
+ *
+ *   The same rule is enforced by the players_delete policy in migration 026,
+ *   which is what holds if somebody calls this action directly. The check
+ *   below exists to say WHICH rows were refused and why - a policy can only
+ *   decline to delete them, silently.
  *
  * WHY THE HANDLES GO INTO THE AUDIT ROW
  *   After the delete there is nothing left to name. Recording what was removed
@@ -555,7 +565,6 @@ export async function bulkAssignOwner(
 export async function deletePlayers(playerIds: string[]): Promise<ActionState> {
   const me = await getMe();
   if (!me) return { error: "Not signed in." };
-  if (me.role !== "admin") return { error: "Only admins can delete players." };
   if (playerIds.length === 0) return { error: "Nothing selected." };
   if (playerIds.length > 200) {
     return { error: "Delete 200 or fewer at a time - this cannot be undone." };
@@ -567,11 +576,47 @@ export async function deletePlayers(playerIds: string[]): Promise<ActionState> {
      as part of the delete would not survive a partial failure. */
   const { data: doomed } = await supabase
     .from("players")
-    .select("id, handle, reference, roobet_username, owner_id, status")
+    /* One string literal, deliberately. Supabase infers the row type by
+       parsing this at compile time, so splitting it across a `+` turns every
+       field into GenericStringError and the whole thing stops type-checking. */
+    .select("id, handle, reference, roobet_username, owner_id, status, weighted_wager, first_deposit_at")
     .in("id", playerIds);
 
   if (!doomed || doomed.length === 0) {
     return { error: "Those players no longer exist." };
+  }
+
+  /* A rep's limits, explained rather than silently applied.
+
+     Without this the policy would simply delete fewer rows than were selected
+     and report a cheerful count, which is the worst possible outcome: it looks
+     like it worked. */
+  if (me.role !== "admin") {
+    const notMine = doomed.filter((p) => p.owner_id !== me.id);
+    if (notMine.length > 0) {
+      return {
+        error:
+          notMine.length === 1
+            ? `${notMine[0].handle} is not in your book, so you can't delete them.`
+            : `${notMine.length} of those are not in your book, so you can't delete them.`,
+      };
+    }
+
+    const earned = doomed.filter(
+      (p) => Number(p.weighted_wager ?? 0) > 0 || p.first_deposit_at !== null
+    );
+    if (earned.length > 0) {
+      const names = earned.slice(0, 3).map((p) => p.handle).join(", ");
+      return {
+        error:
+          `${
+            earned.length === 1 ? `${names} has` : `${earned.length} of those have`
+          } wagered or deposited, so an admin has to remove ${
+            earned.length === 1 ? "them" : "those"
+          } - commission is worked out from that figure.` +
+          (earned.length > 3 ? ` (${names}, and ${earned.length - 3} more.)` : ""),
+      };
+    }
   }
 
   const { error, count } = await supabase
@@ -581,7 +626,10 @@ export async function deletePlayers(playerIds: string[]): Promise<ActionState> {
 
   if (error) return { error: error.message };
 
-  await supabase.from("admin_audit").insert({
+  /* The record of what just happened. Migration 026 widened the audit insert
+     policy so a rep can write this - before that it was admin-only, which
+     would have left rep deletions as the only unrecorded ones. */
+  const { error: auditError } = await supabase.from("admin_audit").insert({
     actor_id: me.id,
     action: "delete_players",
     detail: {
@@ -601,12 +649,19 @@ export async function deletePlayers(playerIds: string[]): Promise<ActionState> {
   refresh();
 
   const n = count ?? doomed.length;
-  return {
-    message:
-      n === 1
-        ? `Deleted ${doomed[0].handle}. That cannot be undone.`
-        : `Deleted ${n} players. That cannot be undone.`,
-  };
+  const what =
+    n === 1 ? `Deleted ${doomed[0].handle}.` : `Deleted ${n} players.`;
+
+  /* Say so if the audit row did not land. The players are gone either way -
+     pretending the record was written would be worse than admitting it was
+     not, because the whole point of it is being able to trust it later. */
+  if (auditError) {
+    return {
+      warning: `${what} It could not be written to the audit log (${auditError.message}).`,
+    };
+  }
+
+  return { message: `${what} That cannot be undone.` };
 }
 
 /* -------------------------------------------------------------- Add a player */
