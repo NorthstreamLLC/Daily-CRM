@@ -135,12 +135,24 @@ export function ImportForm({ team }: { team: TeamMember[] }) {
             >
               {preview.ok ? <Check size={12} /> : <AlertTriangle size={12} />}
               {preview.willImport.toLocaleString()} of{" "}
-              {preview.totalRows.toLocaleString()} rows will import
+              {(preview.totalRows - preview.blankRows).toLocaleString()} rows will
+              import
             </span>
           </div>
 
           <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Fact label="Rows in file" value={preview.totalRows.toLocaleString()} />
+            {/* "Rows in file" means rows with something in them. A book with
+                244 players and 1,555 lines of formula filler underneath is not
+                a 1,799-row file in any sense the reader cares about. */}
+            <Fact
+              label="Rows with data"
+              value={(preview.totalRows - preview.blankRows).toLocaleString()}
+              hint={
+                preview.blankRows > 0
+                  ? `${preview.blankRows.toLocaleString()} empty rows ignored`
+                  : undefined
+              }
+            />
             <Fact label="Will import" value={preview.willImport.toLocaleString()} />
             <Fact
               label="Problems"
@@ -299,10 +311,12 @@ function Fact({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: "warning";
+  hint?: string;
 }) {
   return (
     <div>
@@ -315,6 +329,7 @@ function Fact({
       >
         {value}
       </dd>
+      {hint && <p className="text-caption text-ink-subtle">{hint}</p>}
     </div>
   );
 }

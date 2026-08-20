@@ -79,8 +79,55 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
 
   if (field !== "" || row.length > 0) endRow();
 
-  const headers = (rows.shift() ?? []).map((h) => h.trim());
-  return { headers, rows };
+  /* FIND THE HEADER ROW. Do not assume it is the first one.
+
+     Every book in this company starts with a title banner:
+
+       row 1   Moneyheist's Book — Player Database,,,,,,,,
+       row 2   (blank - dropped above)
+       row 3   Player ID,Player Name / Handle,Source,Roobet Username,...
+
+     Taking row 1 as the header did not merely fail. It squashed to
+     "moneyheistsbookplayerdatabase", which CONTAINS "player", so the loose
+     handle fallback matched it and mapped handle to column 0 - the Player ID
+     column. The import would have run happily and created 244 players all
+     called MH-0001, MH-0002, with no username, no status and no dates.
+
+     A silent wrong answer is far worse than a refusal, so the header is now
+     found by looking for it. */
+  const headerIndex = findHeaderRow(rows);
+  const headers = (rows[headerIndex] ?? []).map((h) => h.trim());
+  return { headers, rows: rows.slice(headerIndex + 1) };
+}
+
+/**
+ * Which of the first few rows is the header?
+ *
+ * Scored on how many known column names it contains. A title banner scores
+ * zero; a real header row scores several. Only the first ten rows are
+ * considered - a header further down than that is not a header, it is a
+ * different problem.
+ */
+function findHeaderRow(rows: string[][]): number {
+  let best = 0;
+  let bestScore = 0;
+
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const squashed = rows[i].map((c) => squash(c.trim()));
+    let score = 0;
+    for (const aliases of Object.values(ALIASES)) {
+      if (squashed.some((h) => h !== "" && aliases.includes(h))) score++;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+
+  /* Nothing recognisable anywhere. Fall back to the first row so the caller
+     reports "couldn't find a handle column" against something real, rather
+     than against an arbitrary row further down. */
+  return bestScore === 0 ? 0 : best;
 }
 
 /** Quote a value only when it needs it, and escape any quotes inside. */
@@ -150,6 +197,32 @@ const ALIASES: Record<string, string[]> = {
 
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+/**
+ * Is this row empty for our purposes?
+ *
+ * A spreadsheet's unused rows are rarely actually empty. Moneyheist's book has
+ * 1,555 of them after the last real player, each one carrying "0" in three
+ * formula columns - DueFlag, ReactivationFlag, UpcomingFlag - because the
+ * formula fills down past the data.
+ *
+ * A row-is-blank test based on "every cell is empty" therefore sees 1,799 rows
+ * where a human sees 244, and every one of the 1,555 becomes a "No player
+ * handle" problem. The real problems then sit below fifteen hundred lines of
+ * noise, which is the same as not reporting them.
+ *
+ * So emptiness is judged only on the columns we actually import. Formula
+ * residue in a column we ignore is not data.
+ */
+export function isBlankRow(
+  cells: string[],
+  mapping: Record<string, number>
+): boolean {
+  for (const index of Object.values(mapping)) {
+    if ((cells[index] ?? "").trim() !== "") return false;
+  }
+  return true;
+}
+
 export function guessMapping(headers: string[]): Record<string, number> {
   const mapping: Record<string, number> = {};
   const squashed = headers.map(squash);
@@ -170,7 +243,14 @@ export function guessMapping(headers: string[]): Record<string, number> {
      Deliberately only for handle. Guessing loosely at a status or a date
      would put wrong data in silently; guessing at the handle either finds the
      name column or produces obvious nonsense the preview will show. */
-  if (mapping.handle === undefined) {
+  /* Only guess loosely if this row looks like a header at all.
+
+     Requiring at least one EXACT match first is what stops the guess running
+     on a title banner. "Moneyheist's Book — Player Database" contains
+     "player", so without this it confidently mapped the handle to a row that
+     was not a header and a column that was not a name. A real header row
+     always matches something exactly - source, status, notes, a date. */
+  if (mapping.handle === undefined && Object.keys(mapping).length > 0) {
     const taken = new Set(Object.values(mapping));
     const loose = (needle: string) =>
       squashed.findIndex(

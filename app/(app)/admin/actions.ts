@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, serviceRoleHelp } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/admin";
-import { resolveStatus, parseCsv, guessMapping, parseDate } from "@/lib/csv";
+import { resolveStatus, parseCsv, guessMapping, parseDate, isBlankRow } from "@/lib/csv";
 
 export type AdminState = { error?: string; message?: string; warning?: string } | null;
 
@@ -560,6 +560,9 @@ export type ImportPreview = {
   sample: Record<string, string>[];
   problems: { row: number; reason: string; handle?: string }[];
   willImport: number;
+  /* Rows empty in every column we import - spreadsheet filler.
+     Counted rather than listed: Moneyheist's book has 1,555 of them. */
+  blankRows: number;
 };
 
 const MAX_IMPORT_ROWS = 20000;
@@ -584,6 +587,7 @@ export async function previewImport(
     sample: [],
     problems: [],
     willImport: 0,
+    blankRows: 0,
   };
 
   try {
@@ -692,11 +696,19 @@ export async function previewImport(
   const seenRoobet = new Map<string, string>();
   const sample: Record<string, string>[] = [];
   let willImport = 0;
+  let blankRows = 0;
 
   rows.forEach((cells, index) => {
     const rowNumber = index + 2; // +1 for the header, +1 for 1-based counting
     const get = (field: string) =>
       mapping[field] !== undefined ? (cells[mapping[field]] ?? "").trim() : "";
+
+    /* Spreadsheet filler, not a problem to report. Listing each one buries
+       the real problems under a thousand lines of noise. */
+    if (isBlankRow(cells, mapping)) {
+      blankRows += 1;
+      return;
+    }
 
     const handle = get("handle");
     if (!handle) {
@@ -813,6 +825,7 @@ export async function previewImport(
     sample,
     problems: problems.slice(0, 200),
     willImport,
+    blankRows,
   };
 }
 
@@ -857,14 +870,22 @@ export async function runImport(
   if (mapping.handle === undefined) return { error: "No player handle column found." };
   if (rows.length > MAX_IMPORT_ROWS) return { error: "Too many rows. Split the file." };
 
-  const [{ data: statuses }, { data: existing }] = await Promise.all([
+  const [{ data: statuses }, { data: existing }, { data: refRows }] = await Promise.all([
     supabase.from("statuses").select("name"),
     supabase.from("players").select("handle").eq("owner_id", targetUserId).limit(100000),
+    /* Every reference already issued. `reference` is globally unique, so a
+       collision does not fail one row - it fails the whole 500-row chunk. */
+    supabase.from("players").select("reference").limit(100000),
   ]);
 
   const validStatuses = new Set((statuses ?? []).map((s) => s.name as string));
   const alreadyThere = new Set(
     (existing ?? []).map((p) => (p.handle as string).trim().toLowerCase())
+  );
+  const referenceTaken = new Set(
+    (refRows ?? [])
+      .map((p) => (p.reference as string | null)?.trim().toUpperCase())
+      .filter(Boolean) as string[]
   );
 
   const { data: batch, error: batchError } = await supabase
@@ -884,10 +905,18 @@ export async function runImport(
   const toInsert: Record<string, unknown>[] = [];
   const seen = new Set<string>();
 
+  let blankRows = 0;
+
   rows.forEach((cells, index) => {
     const rowNumber = index + 2;
     const get = (field: string) =>
       mapping[field] !== undefined ? (cells[mapping[field]] ?? "").trim() : "";
+
+    // Spreadsheet filler. Not imported, and not counted as a rejection.
+    if (isBlankRow(cells, mapping)) {
+      blankRows += 1;
+      return;
+    }
 
     const handle = get("handle");
     if (!handle) {
@@ -915,8 +944,25 @@ export async function runImport(
       rejections.push({ row: rowNumber, reason: lastContact.error, handle });
     }
 
+    /* KEEP THE PLAYER ID FROM THE SHEET where it is safe to.
+
+       The reference trigger leaves a supplied reference alone, so MH-0042 in
+       the spreadsheet stays MH-0042 in the CRM. Without this the numbers are
+       reissued in file order, and the two duplicate rows this book contains
+       would shift every player after them by one - so every ID a rep had
+       written down or pasted into a chat would point at the wrong person.
+
+       Dropped rather than forced when it is already taken: a collision fails
+       the entire chunk of 500, not the single row. Anything dropped just gets
+       a fresh number from the trigger. */
+    const sheetRef = get("reference").trim().toUpperCase();
+    const keepRef =
+      /^[A-Z]{2,4}-\d{1,6}$/.test(sheetRef) && !referenceTaken.has(sheetRef);
+    if (keepRef) referenceTaken.add(sheetRef);
+
     toInsert.push({
       owner_id: targetUserId,
+      ...(keepRef ? { reference: sheetRef } : {}),
       handle,
       roobet_username: get("roobet_username") || null,
       source: get("source") || null,
@@ -951,7 +997,7 @@ export async function runImport(
     .from("import_batches")
     .update({
       rows_imported: imported,
-      rows_rejected: rows.length - imported,
+      rows_rejected: rows.length - blankRows - imported,
       rejections: rejections.slice(0, 500),
     })
     .eq("id", batch.id);
@@ -962,12 +1008,12 @@ export async function runImport(
   await audit(me.id, "import", targetUserId, {
     filename: file.name,
     imported,
-    rejected: rows.length - imported,
+    rejected: rows.length - blankRows - imported,
   });
 
   refresh();
 
-  const skipped = rows.length - imported;
+  const skipped = rows.length - blankRows - imported;
   return {
     message: `${imported.toLocaleString()} imported into ${target.name}'s book.${
       skipped > 0 ? ` ${skipped.toLocaleString()} skipped — see the report below.` : ""
