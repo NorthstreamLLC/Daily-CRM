@@ -89,6 +89,38 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  /* Hand the verified id to the page so it need not ask again.
+  
+     getUser() is a network call to Supabase Auth, and it was happening TWICE
+     on every navigation: once here to guard the route, once inside getMe. The
+     second one asks a question this one already answered.
+  
+     Safe because the header is written here, on the forwarded request, after
+     verification - anything a client sent under the same name is overwritten,
+     so it cannot be spoofed from outside. */
+  {
+    const headers = new Headers(request.headers);
+
+    if (user) {
+      headers.set("x-verified-user", user.id);
+    } else {
+      /* CRITICAL: strip it when there is NO verified user.
+      
+         Only setting it on the happy path leaves a hole - a request to a
+         public route carrying a forged x-verified-user would pass straight
+         through untouched, and getMe would believe it. Deleting it
+         unconditionally means the header can only ever have been written
+         here, after verification. */
+      headers.delete("x-verified-user");
+    }
+
+    response = NextResponse.next({ request: { headers } });
+    // Cookies set during the refresh above must survive being re-wrapped.
+    for (const cookie of request.cookies.getAll()) {
+      response.cookies.set(cookie.name, cookie.value);
+    }
+  }
+
   // Already signed in and sitting on the login page - send them onward.
   if (user && path === "/login") {
     const url = request.nextUrl.clone();

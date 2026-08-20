@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
  * honest.
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const me = await getMe();
+  /* Both in one wait. getUnreadCount is scoped by Row Level Security, not by
+     `me`, so it never needed to queue behind it. */
+  const [me, unreadCount] = await Promise.all([getMe(), getUnreadCount()]);
 
   if (!me) {
     /* A valid session with no profile row.
@@ -66,8 +68,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
     );
   }
-
-  const unreadCount = await getUnreadCount();
 
   const items: NavItem[] = [
     { href: "/today", label: "Today", icon: "today" },

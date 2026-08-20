@@ -14,7 +14,7 @@ import {
   type BookFilters,
   type BookSort,
 } from "@/lib/book";
-import { getMe, getSetting, getSources, getStatuses } from "@/lib/queries";
+import { getMe, getSettings, getSources, getStatuses } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -72,12 +72,11 @@ export default async function BookPage({
 
   const supabase = createClient();
 
-  const [attemptsRaw, overdueRaw] = await Promise.all([
-    getSetting("followup_attempts_before_dead", "3"),
-    getSetting("overdue_highlight_hours", "24"),
-  ]);
-
-  const [book, counts, statuses, sources, team, owner] = await Promise.all([
+  /* Settings ride along with everything else rather than gating it. They were
+     their own await, which on a slow link is a whole extra round trip spent
+     fetching two numbers. */
+  const [settings, book, counts, statuses, sources, team, owner] = await Promise.all([
+    getSettings(["followup_attempts_before_dead", "overdue_highlight_hours"]),
     getBook(me, filters, ownerId),
     getBookCounts(me, ownerId),
     getStatuses(),
@@ -222,8 +221,8 @@ export default async function BookPage({
             rows={book.rows}
             statuses={statuses}
             timezone={me.timezone}
-            attemptsThreshold={Number(attemptsRaw) || 3}
-            overdueHours={Number(overdueRaw) || 24}
+            attemptsThreshold={Number(settings.followup_attempts_before_dead) || 3}
+            overdueHours={Number(settings.overdue_highlight_hours) || 24}
             page={book.page}
             pageCount={book.pageCount}
             pageSize={book.pageSize}

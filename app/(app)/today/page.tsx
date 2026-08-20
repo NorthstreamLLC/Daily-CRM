@@ -25,7 +25,7 @@ import {
   getTargets,
   getStatuses,
   getSources,
-  getSetting,
+  getSettings,
 } from "@/lib/queries";
 import { startOfDayUtc } from "@/lib/time";
 import { getChurn } from "@/lib/churn";
@@ -192,15 +192,16 @@ export default async function TodayPage({
 
   const justReset = searchParams.reset === "1";
 
-  const [comingUpDaysRaw, attemptsRaw, overdueRaw] = await Promise.all([
-    getSetting("coming_up_window_days", "7"),
-    getSetting("followup_attempts_before_dead", "3"),
-    getSetting("overdue_highlight_hours", "24"),
+  // Three settings, one query.
+  const settings = await getSettings([
+    "coming_up_window_days",
+    "followup_attempts_before_dead",
+    "overdue_highlight_hours",
   ]);
 
-  const comingUpDays = Number(comingUpDaysRaw) || 7;
-  const attemptsThreshold = Number(attemptsRaw) || 3;
-  const overdueHours = Number(overdueRaw) || 24;
+  const comingUpDays = Number(settings.coming_up_window_days) || 7;
+  const attemptsThreshold = Number(settings.followup_attempts_before_dead) || 3;
+  const overdueHours = Number(settings.overdue_highlight_hours) || 24;
 
   /* An admin may look at any rep's day; a rep is pinned to their own,
      whatever the URL says. Everything below is scoped to this id explicitly -

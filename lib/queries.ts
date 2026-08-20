@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { startOfDayUtc, endOfDayUtc, startOfDayPlusUtc } from "@/lib/time";
 
@@ -53,15 +54,33 @@ const PLAYER_FIELDS =
  */
 export const getMe = cache(async function getMe(): Promise<Me | null> {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+
+  /* The middleware already verified the session and put the id on the
+     request. Trusting it saves a full network round trip to Supabase Auth on
+     every single navigation - the single biggest avoidable delay in the app.
+  
+     Only our middleware can set this header: it writes it after verifying,
+     overwriting anything a client sent under the same name. If it is absent
+     (a route the matcher skips, or an old deployment) we verify properly. */
+  let userId: string | null = null;
+  try {
+    userId = headers().get("x-verified-user");
+  } catch {
+    userId = null;
+  }
+
+  if (!userId) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    userId = user.id;
+  }
 
   const { data } = await supabase
     .from("users")
     .select("id, name, code, role, timezone, default_source")
-    .eq("id", user.id)
+    .eq("id", userId)
     .single();
 
   return (data as Me) ?? null;
@@ -367,3 +386,24 @@ export async function getUnreadCount(): Promise<number> {
     .is("read_at", null);
   return count ?? 0;
 }
+
+
+/**
+ * Several settings in one query.
+ *
+ * Asking for three keys separately is three round trips even inside a
+ * Promise.all - the client opens three requests. One `in` query is one.
+ */
+export const getSettings = cache(async function getSettings(
+  keys: string[]
+): Promise<Record<string, string>> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("settings")
+    .select("key, value")
+    .in("key", keys);
+
+  return Object.fromEntries(
+    (data ?? []).map((row) => [row.key as string, row.value as string])
+  );
+});
