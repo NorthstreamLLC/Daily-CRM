@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Me } from "@/lib/queries";
+import { onlyDue, type Me } from "@/lib/queries";
 import { dayStartFromYmd, endOfDayUtc, startOfDayUtc, ymdInZone } from "@/lib/time";
 
 export type CalendarItem = {
@@ -94,19 +94,25 @@ export async function getCalendarMonth(
 
   const [{ data: dueNow }, { data: scheduled }, { data: meetings }] =
     await Promise.all([
-      // Today: the queue, condition for condition the same as getDueNow.
+      /* Today: the queue - now by CALLING getDueNow's rule rather than
+         restating it. The comment here used to claim it was "condition for
+         condition the same as getDueNow", and it was, right up until getDueNow
+         changed and this did not. That is the third place this rule had been
+         copied to, and the second one to go stale. */
       monthIncludesToday
-        ? supabase
-            .from("players_enriched")
-            .select(PLAYER_COLS)
-            .eq("owner_id", owner)
-            .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`)
-            .or(
-              `last_contact_at.is.null,next_followup_at.lte.${endToday.toISOString()},missing_roobet.is.true`
-            )
-            .limit(1000)
+        ? onlyDue(
+            supabase
+              .from("players_enriched")
+              .select(PLAYER_COLS)
+              .eq("owner_id", owner)
+              .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`),
+            endToday.toISOString()
+          ).limit(1000)
         : Promise.resolve({ data: [] as never[] }),
-      // Future days: whoever's follow-up lands there, username or not.
+      /* Future days: whoever's follow-up lands there, username or not -
+         including dead leads on their 30-day retarget date. Today is the work
+         you have been given; the days ahead are a schedule, and knowing that
+         forty retargets land on Thursday is worth seeing. */
       scheduledStart < rangeEnd
         ? supabase
             .from("players_enriched")
@@ -153,14 +159,19 @@ export async function getCalendarMonth(
     });
   }
 
-  const pushPlayer = (ymd: string, p: {
+  /* Named, because it is now referred to in three places rather than being
+     written out inline each time. */
+  type CalendarPlayer = {
     id: string;
     handle: string;
     reference: string;
     status: string;
     next_action: string;
     missing_roobet: boolean;
-  }) => {
+    next_followup_at?: string | null;
+  };
+
+  const pushPlayer = (ymd: string, p: CalendarPlayer) => {
     at(ymd).items.push({
       kind: "followup",
       id: p.id,
@@ -174,12 +185,13 @@ export async function getCalendarMonth(
   };
 
   // Today = the queue, exactly.
-  for (const p of dueNow ?? []) pushPlayer(todayYmd, p);
+  const dueToday = (dueNow ?? []) as CalendarPlayer[];
+  for (const p of dueToday) pushPlayer(todayYmd, p);
 
   // The future = the schedule. Anyone already in today's cell is skipped so a
   // player never appears twice in one month.
-  const inToday = new Set((dueNow ?? []).map((p) => p.id));
-  for (const p of scheduled ?? []) {
+  const inToday = new Set(dueToday.map((p) => p.id));
+  for (const p of (scheduled ?? []) as CalendarPlayer[]) {
     if (!p.next_followup_at || inToday.has(p.id)) continue;
     pushPlayer(dayOf(p.next_followup_at), p);
   }
