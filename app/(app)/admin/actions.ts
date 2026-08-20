@@ -796,7 +796,7 @@ export async function previewImport(
       });
     }
 
-    for (const field of ["assigned_at", "last_contact_at"]) {
+    for (const field of ["assigned_at", "last_contact_at", "first_deposit_at"]) {
       const value = get(field);
       if (value) {
         const { error } = parseDate(value);
@@ -938,10 +938,22 @@ export async function runImport(
     const status = get("status");
     const assigned = parseDate(get("assigned_at"));
     const lastContact = parseDate(get("last_contact_at"));
+    const firstDeposit = parseDate(get("first_deposit_at"));
+
+    /* A count, not a date, so a stray "3 attempts" must not become NaN and
+       blow up the insert for the whole chunk. */
+    const attemptsRaw = Number(get("followup_attempts"));
+    const attempts =
+      Number.isFinite(attemptsRaw) && attemptsRaw >= 0
+        ? Math.min(Math.floor(attemptsRaw), 99)
+        : 0;
 
     if (assigned.error) rejections.push({ row: rowNumber, reason: assigned.error, handle });
     if (lastContact.error) {
       rejections.push({ row: rowNumber, reason: lastContact.error, handle });
+    }
+    if (firstDeposit.error) {
+      rejections.push({ row: rowNumber, reason: firstDeposit.error, handle });
     }
 
     /* KEEP THE PLAYER ID FROM THE SHEET where it is safe to.
@@ -970,6 +982,8 @@ export async function runImport(
       notes: get("notes") || null,
       assigned_at: (assigned.date ?? new Date()).toISOString(),
       last_contact_at: lastContact.date ? lastContact.date.toISOString() : null,
+      first_deposit_at: firstDeposit.date ? firstDeposit.date.toISOString() : null,
+      followup_attempts: attempts,
       import_batch_id: batch.id,
     });
   });

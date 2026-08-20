@@ -190,6 +190,25 @@ const ALIASES: Record<string, string[]> = {
     "lastcontactdate",
     "lasttouch",
   ],
+  /* The day they first deposited.
+
+     Left out of the first version, and the Wager page caught it immediately:
+     "wagering, never marked deposited" listed exactly the three players whose
+     sheet had an FTD date. Without this every imported player who deposited
+     looks like a missed FTD forever, and the first-deposit numbers are wrong
+     by however many the old sheet already knew about. */
+  first_deposit_at: [
+    "ftddate",
+    "ftd",
+    "firstdeposit",
+    "firstdepositat",
+    "firstdepositdate",
+    "depositdate",
+  ],
+  /* How many times they have been chased. Resetting this to zero on import
+     hides everyone who is already close to the give-up threshold, which is
+     the one signal that says "stop spending time here". */
+  followup_attempts: ["followupattempts", "attempts", "contactattempts", "touches"],
   kyc_status: ["kycstatus", "kyc"],
   deposit_status: ["depositstatus", "deposited", "deposit"],
   reference: ["reference", "ref", "id", "playerid"],
