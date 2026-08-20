@@ -89,6 +89,69 @@ export function Spinner({ className }: { className?: string }) {
   );
 }
 
+/**
+ * A grey block standing in for content that has not arrived.
+ *
+ * WHY THIS EXISTS AT ALL
+ *   Every page here is force-dynamic, so a click cannot render until the
+ *   server has finished querying. Without a loading boundary Next.js keeps the
+ *   OLD page on screen, frozen, until the new one is completely ready - so a
+ *   700ms render is indistinguishable from a broken app, and the honest
+ *   report is "each click takes 2-3 seconds".
+ *
+ *   A skeleton does not make anything faster. It makes the app answer
+ *   immediately, which is most of what "fast" means to the person clicking.
+ */
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={cn("animate-pulse rounded bg-line-strong/60", className)}
+      aria-hidden="true"
+    />
+  );
+}
+
+/**
+ * The shape of a list page while it loads: heading, then rows.
+ *
+ * Deliberately matches the real layout's proportions. A skeleton that settles
+ * into a different shape than the content that replaces it reads as a glitch.
+ */
+export function ListSkeleton({ rows = 8, title }: { rows?: number; title?: string }) {
+  return (
+    <div role="status" aria-label={title ? `Loading ${title}` : "Loading"}>
+      <span className="sr-only">Loading…</span>
+      <div className="mb-5 flex items-end justify-between gap-3">
+        <div>
+          <Skeleton className="h-7 w-40" />
+          <Skeleton className="mt-2 h-4 w-56" />
+        </div>
+        <Skeleton className="h-8 w-28" />
+      </div>
+
+      <div className="overflow-hidden rounded-card border border-line-strong bg-surface">
+        <div className="border-b-2 border-line-heavy bg-sunken px-3 py-2">
+          <Skeleton className="h-3 w-24" />
+        </div>
+        {Array.from({ length: rows }).map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex items-center gap-3 border-b border-line px-3 py-2.5 last:border-0",
+              i % 2 === 1 && "bg-sunken/40"
+            )}
+          >
+            <Skeleton className="h-4 w-4 shrink-0 rounded-sm" />
+            <Skeleton className="h-4 flex-1 max-w-[180px]" />
+            <Skeleton className="hidden h-4 w-24 sm:block" />
+            <Skeleton className="ml-auto h-4 w-16" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------- Form fields */
 
 const FIELD_BASE =

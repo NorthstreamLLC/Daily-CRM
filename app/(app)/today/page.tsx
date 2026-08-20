@@ -192,16 +192,18 @@ export default async function TodayPage({
 
   const justReset = searchParams.reset === "1";
 
-  // Three settings, one query.
-  const settings = await getSettings([
+  /* Three settings, one query - and started here rather than awaited here.
+
+     Only the two "coming up" queries actually need a value out of it. Awaiting
+     the settings row on its own line made every other query on this page wait
+     behind it for no reason: one more sequential round trip to the database,
+     paid on every single navigation. Kicking it off now and awaiting it inside
+     the batch below puts it alongside the work instead of in front of it. */
+  const settingsPromise = getSettings([
     "coming_up_window_days",
     "followup_attempts_before_dead",
     "overdue_highlight_hours",
   ]);
-
-  const comingUpDays = Number(settings.coming_up_window_days) || 7;
-  const attemptsThreshold = Number(settings.followup_attempts_before_dead) || 3;
-  const overdueHours = Number(settings.overdue_highlight_hours) || 24;
 
   /* An admin may look at any rep's day; a rep is pinned to their own,
      whatever the URL says. Everything below is scoped to this id explicitly -
@@ -216,13 +218,24 @@ export default async function TodayPage({
 
   const supabase = createClient();
 
-  const [dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
+  /* The only two queries that genuinely depend on a setting. They chain off
+     the promise above, so they cost one round trip after it - while everything
+     else in the batch has been running the whole time. */
+  const comingUpPromise = settingsPromise.then((s) =>
+    // Cap it: a rep with 200 follow-ups in the window should not get
+    // 200 rows in one go. The tab badge shows the true total.
+    getComingUp(me, Number(s.coming_up_window_days) || 7, ownerId, 60)
+  );
+  const comingTotalPromise = settingsPromise.then((s) =>
+    countComingUp(me, Number(s.coming_up_window_days) || 7, ownerId)
+  );
+
+  const [settings, dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
+      settingsPromise,
       getDueNow(me, ownerId),
-      // Cap it: a rep with 200 follow-ups in the window should not get
-      // 200 rows in one go. The tab badge shows the true total.
-      getComingUp(me, comingUpDays, ownerId, 60),
-      countComingUp(me, comingUpDays, ownerId),
+      comingUpPromise,
+      comingTotalPromise,
       /* Dead leads are not today's work - they are a standing list, and at
          300 players they buried the rows that actually need doing. They live
          in the Book now, one filter click away. Only the count is kept, for
@@ -243,6 +256,10 @@ export default async function TodayPage({
 
   const team = (teamRes.data ?? []) as { id: string; name: string }[];
   const ownerName = (ownerRes.data as { name: string } | null)?.name ?? null;
+
+  const comingUpDays = Number(settings.coming_up_window_days) || 7;
+  const attemptsThreshold = Number(settings.followup_attempts_before_dead) || 3;
+  const overdueHours = Number(settings.overdue_highlight_hours) || 24;
 
   /**
    * Split the queue into overdue and due-today.

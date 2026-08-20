@@ -200,15 +200,22 @@ export default async function StatsPage({
   const wagerPeriod = resolveReportPeriod(reportChoiceFor(range.key));
   const rangesDiffer = wagerPeriod.label.toLowerCase() !== range.label.toLowerCase();
 
-  const targets = await getTargets(me, ownerId);
+  /* Started, not awaited. Only getRecords needs a number out of this, and
+     awaiting it on its own line made all eight queries below queue behind one
+     small lookup - an extra round trip to the database on every visit. */
+  const targetsPromise = getTargets(me, ownerId);
+  const recordsPromise = targetsPromise.then((t) =>
+    getRecords(ownerId, me.timezone, t.activeLeads)
+  );
 
-  const [funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
+  const [targets, funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
     await Promise.all([
+      targetsPromise,
       getFunnel(ownerId, range),
       getActivity(ownerId, range),
       getSourcePerformance(ownerId, range),
       getTrend(ownerId, me.timezone, trendDays(range)),
-      getRecords(ownerId, me.timezone, targets.activeLeads),
+      recordsPromise,
       // RLS scopes this to the viewer's own players, so a rep sees their book's
       // composition and an admin viewing here sees everyone's combined.
       getFunnelStages(),
