@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMe } from "@/lib/queries";
+import { canSeeWager, getMe } from "@/lib/queries";
 import { getWagerReport, resolveReportPeriod } from "@/lib/admin";
 import { toCsv, type Row } from "@/lib/csv";
 
@@ -31,6 +31,16 @@ const COLUMNS = [
 export async function GET(request: Request) {
   const me = await getMe();
   if (!me) return new NextResponse("Not signed in", { status: 401 });
+
+  /* Refused here, not merely hidden in the interface.
+
+     Hiding the export button while the endpoint still serves the CSV is not a
+     rule, it is a suggestion - and this URL is guessable. */
+  if (!(await canSeeWager(me))) {
+    return new NextResponse("Wager figures are not available to your account.", {
+      status: 403,
+    });
+  }
 
   const url = new URL(request.url);
   const choice = url.searchParams.get("period") ?? "all";

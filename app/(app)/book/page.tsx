@@ -14,7 +14,7 @@ import {
   type BookFilters,
   type BookSort,
 } from "@/lib/book";
-import { getMe, getSettings, getSources, getStatuses } from "@/lib/queries";
+import { getMe, getSettings, getSources, getStatuses, canSeeWager } from "@/lib/queries";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -75,7 +75,8 @@ export default async function BookPage({
   /* Settings ride along with everything else rather than gating it. They were
      their own await, which on a slow link is a whole extra round trip spent
      fetching two numbers. */
-  const [settings, book, counts, statuses, sources, team, owner] = await Promise.all([
+  const [showWager, settings, book, counts, statuses, sources, team, owner] = await Promise.all([
+    canSeeWager(me),
     getSettings(["followup_attempts_before_dead", "overdue_highlight_hours"]),
     getBook(me, filters, ownerId),
     getBookCounts(me, ownerId),
@@ -218,6 +219,7 @@ export default async function BookPage({
       ) : (
         <Suspense fallback={<div className="h-96" />}>
           <BookTable
+            showWager={showWager}
             rows={book.rows}
             statuses={statuses}
             timezone={me.timezone}

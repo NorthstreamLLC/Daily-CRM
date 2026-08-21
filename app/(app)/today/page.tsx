@@ -27,6 +27,7 @@ import {
   getStatuses,
   getSources,
   getSettings,
+  canSeeWager,
 } from "@/lib/queries";
 import { startOfDayUtc } from "@/lib/time";
 import { getChurn } from "@/lib/churn";
@@ -233,7 +234,7 @@ export default async function TodayPage({
 
   const startedAt = Date.now();
 
-  const [settings, dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
+  const [settings, dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, showWager, teamRes, ownerRes] =
     await Promise.all([
       settingsPromise,
       getDueNow(me, ownerId),
@@ -249,6 +250,7 @@ export default async function TodayPage({
       getStatuses(),
       getSources(),
       getChurn(me.timezone, ownerId, 20),
+      canSeeWager(me),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
         : Promise.resolve({ data: null }),
@@ -479,6 +481,7 @@ export default async function TodayPage({
               <div className="space-y-1.5">
                 {churn.watched.length > 0 && (
                   <ChurnList
+                    showWager={showWager}
                     players={churn.watched}
                     kind="watched"
                     windowDays={churn.windowDays}
@@ -488,6 +491,7 @@ export default async function TodayPage({
                 )}
                 {churn.quiet.length > 0 && (
                   <ChurnList
+                    showWager={showWager}
                     players={churn.quiet}
                     kind="quiet"
                     windowDays={churn.windowDays}
@@ -497,6 +501,7 @@ export default async function TodayPage({
                 )}
                 {churn.dropping.length > 0 && (
                   <ChurnList
+                    showWager={showWager}
                     players={churn.dropping}
                     kind="dropping"
                     windowDays={churn.windowDays}

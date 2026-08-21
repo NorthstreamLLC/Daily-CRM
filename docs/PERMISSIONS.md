@@ -101,3 +101,32 @@ the token expires. The service-role ban closes this properly (token refresh
 fails), and the layout blocks the interface. The airtight version is an
 `active` check inside the RLS policies themselves — a migration touching every
 policy, not yet done.
+
+## Wager figures
+
+| Who | Sees dollar amounts |
+| --- | --- |
+| Admin | Always, including when viewing as a rep |
+| Rep | Only if **Admin → Settings → "Show wager figures to reps"** is on |
+
+Off by default. A rep who can see that one of their players wagered $400,000
+has a number to negotiate with, and the conversation stops being about the
+work. That is a commercial decision rather than a technical one, so it is a
+setting an admin can flip — no deploy, no asking anybody.
+
+**What goes away when it is off:**
+
+- "What your players wagered" on the rep's own Stats page
+- the **Wagered** column in the Book — removed from the column list entirely,
+  not blanked, or the header would still offer to sort by a figure that is not
+  there
+- the amounts in **Falling away**. The list itself stays, and so does the
+  ranking: a rep still sees *who* has gone quiet and by what percentage, just
+  not what they were worth. Losing the list would cost them work they should
+  be doing; losing the figure costs them nothing.
+- the wager CSV, **refused at `/api/wager-report`** rather than hidden. Hiding
+  the button while the endpoint still serves the file is not a rule, it is a
+  suggestion — and the URL is guessable.
+
+Admins are unaffected everywhere, including the Wager page, which is admin-only
+in the first place.

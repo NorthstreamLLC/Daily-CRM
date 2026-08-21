@@ -28,14 +28,30 @@ type Column = {
   className?: string;
 };
 
-const COLUMNS: Column[] = [
-  { key: "handle", label: "Player" },
-  { key: null, label: "Roobet username", className: "w-[170px]" },
-  { key: "status", label: "Status", className: "w-[172px]" },
-  { key: "weighted_wager", label: "Wagered", align: "right", className: "w-[104px]" },
-  { key: "last_contact_at", label: "Last contact", align: "right", className: "w-[112px]" },
-  { key: "next_followup_at", label: "Due", align: "right", className: "w-[112px]" },
-];
+/* Built rather than declared, because one column is conditional.
+
+   A rep does not see Wagered unless an admin has turned it on - and it has to
+   leave the COLUMNS list entirely, not just render blank, or the header would
+   still offer to sort by a figure that is not there. */
+function columnsFor(showWager: boolean): Column[] {
+  return [
+    { key: "handle", label: "Player" },
+    { key: null, label: "Roobet username", className: "w-[170px]" },
+    { key: "status", label: "Status", className: "w-[172px]" },
+    ...(showWager
+      ? ([
+          {
+            key: "weighted_wager",
+            label: "Wagered",
+            align: "right",
+            className: "w-[104px]",
+          },
+        ] as Column[])
+      : []),
+    { key: "last_contact_at", label: "Last contact", align: "right", className: "w-[112px]" },
+    { key: "next_followup_at", label: "Due", align: "right", className: "w-[112px]" },
+  ];
+}
 
 const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -81,6 +97,7 @@ export function BookTable({
   total,
   readOnly = false,
   team,
+  showWager = true,
 }: {
   rows: Player[];
   statuses: StatusOption[];
@@ -94,7 +111,11 @@ export function BookTable({
   readOnly?: boolean;
   /** Present only for admins - enables "Assign to" in the bulk bar. */
   team?: { id: string; name: string; code: string }[];
+  /** Admins always; a rep only if "Show wager figures to reps" is on. */
+  showWager?: boolean;
 }) {
+  const COLUMNS = columnsFor(showWager);
+
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -466,18 +487,20 @@ export function BookTable({
                       />
                     </td>
 
-                    <td
-                      className={cn(
-                        "tabular px-3 py-1.5 text-right align-middle text-small",
-                        Number(p.weighted_wager ?? 0) > 0
-                          ? "font-medium text-ink"
-                          : "text-ink-subtle"
-                      )}
-                    >
-                      {Number(p.weighted_wager ?? 0) > 0
-                        ? money(Number(p.weighted_wager))
-                        : "—"}
-                    </td>
+                    {showWager && (
+                      <td
+                        className={cn(
+                          "tabular px-3 py-1.5 text-right align-middle text-small",
+                          Number(p.weighted_wager ?? 0) > 0
+                            ? "font-medium text-ink"
+                            : "text-ink-subtle"
+                        )}
+                      >
+                        {Number(p.weighted_wager ?? 0) > 0
+                          ? money(Number(p.weighted_wager))
+                          : "—"}
+                      </td>
+                    )}
 
                     <td className="tabular px-3 py-1.5 text-right align-middle text-small text-ink-muted">
                       {formatDate(p.last_contact_at, timezone)}

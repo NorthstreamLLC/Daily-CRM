@@ -22,12 +22,17 @@ export function ChurnList({
   /** Lets a VIP rep pin or unpin straight from the row. */
   allowWatch = false,
   emptyText,
+  showWager = true,
 }: {
   players: ChurnPlayer[];
   kind: "quiet" | "dropping" | "watched";
   windowDays: number;
   showOwner?: boolean;
   limit?: number;
+  /* When off, WHO is falling away still shows - the ranking is unchanged -
+     but not what they were worth. A rep can still act on the list; they just
+     do not get a figure to negotiate with. */
+  showWager?: boolean;
   allowWatch?: boolean;
   emptyText?: string;
 }) {
@@ -93,22 +98,34 @@ export function ChurnList({
                   </span>
                   <span className="tabular mt-0.5 block text-caption text-ink-subtle">
                     {p.reference} · {p.status}
-                    {showOwner && ` · ${p.ownerName}`} · {money(p.allTime)} lifetime
+                    {showOwner && ` · ${p.ownerName}`}
+                    {showWager && ` · ${money(p.allTime)} lifetime`}
                   </span>
                 </span>
 
                 <span className="flex shrink-0 items-center gap-3">
-                  <span className="text-right">
-                    <span className="tabular block text-body font-semibold text-ink">
-                      {money(p.current)}
+                  {showWager ? (
+                    <span className="text-right">
+                      <span className="tabular block text-body font-semibold text-ink">
+                        {money(p.current)}
+                      </span>
+                      <span className="tabular block text-caption text-ink-subtle">
+                        was {money(p.previous)}
+                        {lost > 0 && (
+                          <span className="text-danger"> · −{money(lost)}</span>
+                        )}
+                      </span>
                     </span>
-                    <span className="tabular block text-caption text-ink-subtle">
-                      was {money(p.previous)}
-                      {lost > 0 && (
-                        <span className="text-danger"> · −{money(lost)}</span>
-                      )}
+                  ) : (
+                    /* The drop, without the amount. A rep still learns this
+                       player has more than halved; they do not learn against
+                       what. */
+                    <span className="text-right text-caption text-danger">
+                      {p.previous > 0
+                        ? `down ${Math.round((1 - p.current / p.previous) * 100)}%`
+                        : "gone quiet"}
                     </span>
-                  </span>
+                  )}
                   {allowWatch && (
                     <WatchToggle playerId={p.id} watching={p.pinned} compact />
                   )}

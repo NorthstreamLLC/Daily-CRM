@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { BarChart, Flame, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
-import { getMe, getTargets } from "@/lib/queries";
+import { canSeeWager, getMe, getTargets } from "@/lib/queries";
 import {
   getFunnelStages,
   getWagerReport,
@@ -208,8 +208,9 @@ export default async function StatsPage({
     getRecords(ownerId, me.timezone, t.activeLeads)
   );
 
-  const [targets, funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
+  const [showWager, targets, funnel, activity, sources, trend, records, stages, wager, teamRes, ownerRes] =
     await Promise.all([
+      canSeeWager(me),
       targetsPromise,
       getFunnel(ownerId, range),
       getActivity(ownerId, range),
@@ -427,7 +428,12 @@ export default async function StatsPage({
         )}
       </section>
 
-      {/* Your players' wager */}
+      {/* Your players' wager - admins always, reps only if the setting says so.
+
+          A rep who can see a player wagered $400,000 has a number to negotiate
+          with, and the conversation stops being about the work. Admin >
+          Settings > "Show wager figures to reps" turns it back on. */}
+      {showWager && (
       <section className="mb-8">
         <SectionHeader
           title="What your players wagered"
@@ -522,6 +528,7 @@ export default async function StatsPage({
           </>
         )}
       </section>
+      )}
 
       {/* Sources */}
       <section className="mb-8">

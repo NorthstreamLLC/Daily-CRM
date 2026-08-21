@@ -448,3 +448,23 @@ export const getSettings = cache(async function getSettings(
     (data ?? []).map((row) => [row.key as string, row.value as string])
   );
 });
+
+/**
+ * MAY THIS PERSON SEE WAGER FIGURES?
+ *
+ * Admins always. A rep only if `reps_see_wager` is on.
+ *
+ * The reasoning is commercial rather than technical: a rep who can see that
+ * one of their players wagered $400,000 has a number to negotiate with, and
+ * the conversation stops being about the work. So it is a setting an admin can
+ * flip, not a constant somebody has to redeploy.
+ *
+ * ADMIN MEANS ADMIN, not "viewing as". An admin looking at a rep's page is
+ * still an admin and still sees the money - the question this answers is what
+ * the REP sees when signed in as themselves.
+ */
+export async function canSeeWager(me: Me): Promise<boolean> {
+  if (me.role === "admin") return true;
+  const settings = await getSettings(["reps_see_wager"]);
+  return settings.reps_see_wager === "true";
+}
