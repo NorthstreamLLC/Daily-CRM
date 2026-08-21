@@ -342,8 +342,6 @@ export type DepositSignals = {
  * totals, so a window is the movement between snapshots, and a player's first
  * ever snapshot is a baseline rather than activity.
  */
-export const UNCLAIMED_PAGE_SIZE = 50;
-export const UNCLAIMED_MAX_PAGES = 10;
 
 /* getWagerOverview lived here.
 
