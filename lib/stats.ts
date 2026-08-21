@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { onlyDue, type Me } from "@/lib/queries";
+import { onlyDue, requireRoobetInQueue, type Me } from "@/lib/queries";
 import { startOfDayPlusUtc, startOfDayUtc, ymdInZone } from "@/lib/time";
 import { prettyDate, type DateRange } from "@/lib/ranges";
 
@@ -439,7 +439,8 @@ export async function getLeaderboard(
         supabase
           .from("players_enriched")
           .select("owner_id, last_contact_at, next_followup_at, missing_roobet"),
-        nowIso
+        nowIso,
+        await requireRoobetInQueue()
       ).limit(200000);
       return data ?? [];
     })(),

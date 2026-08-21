@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { onlyDue, type Me } from "@/lib/queries";
+import { onlyDue, requireRoobetInQueue, type Me } from "@/lib/queries";
 import { dayStartFromYmd, endOfDayUtc, startOfDayUtc, ymdInZone } from "@/lib/time";
 
 export type CalendarItem = {
@@ -106,7 +106,8 @@ export async function getCalendarMonth(
               .select(PLAYER_COLS)
               .eq("owner_id", owner)
               .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`),
-            endToday.toISOString()
+            endToday.toISOString(),
+            await requireRoobetInQueue()
           ).limit(1000)
         : Promise.resolve({ data: [] as never[] }),
       /* Future days: whoever's follow-up lands there, username or not -

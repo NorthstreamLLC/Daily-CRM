@@ -104,29 +104,48 @@ export const getSetting = cache(async function getSetting(
 /**
  * WHAT COUNTS AS DUE - the one definition.
  *
- * This rule was written out twice: once in getDueNow for a rep's own queue,
- * and again in getLeaderboard for the admin "outstanding" column. They drifted,
- * as duplicated rules do. After importing Moneyheist's book his Today page
- * said 8 and the admin overview said 224 about the same rep on the same day,
- * because only one of the two had learnt to leave dead leads alone.
- *
- * Both now call this. If the rule changes, it changes in one place, and the
- * two numbers cannot disagree again.
+ * This rule was written out three times: getDueNow for a rep's own queue,
+ * getLeaderboard for the admin "outstanding" column, and the Calendar. They
+ * drifted, as duplicated rules do. Everything calls this now.
  *
  * The rule: a player is due if they have never been contacted, or their
- * follow-up date has arrived, or they still have no Roobet username - and in
- * every case only if they are not a dead lead, which has its own 30-day
- * retarget rhythm and its own place in the Book.
+ * follow-up date has arrived - and in either case only if they are not a dead
+ * lead, which has its own 30-day retarget rhythm and its own place in the Book.
+ *
+ * PLUS, optionally, anyone with no Roobet username.
+ *
+ * That last part was hardcoded ON, and it does not survive contact with a real
+ * book. Tuna has 181 live players and 133 of them have no Roobet username, so
+ * his queue was 133 items every morning, permanently, and Plat's was 321 of
+ * 325. A queue that never empties is a queue nobody opens.
+ *
+ * It is now the `require_roobet_username` setting - which already existed,
+ * with that exact description, and which nothing had ever read.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function onlyDue<T extends { or: any; eq: any }>(
+export function onlyDue<T extends { or: any; eq: any }>( // eslint-disable-line @typescript-eslint/no-explicit-any
   query: T,
-  endTodayIso: string
+  endTodayIso: string,
+  requireRoobet: boolean
 ): T {
-  return query
-    .eq("is_dead", false)
-    .or(`last_contact_at.is.null,next_followup_at.lte.${endTodayIso},missing_roobet.is.true`);
+  const clauses = [
+    "last_contact_at.is.null",
+    `next_followup_at.lte.${endTodayIso}`,
+    ...(requireRoobet ? ["missing_roobet.is.true"] : []),
+  ];
+
+  return query.eq("is_dead", false).or(clauses.join(","));
 }
+
+/**
+ * Does a missing Roobet username put someone in the daily queue?
+ *
+ * Read once per render, cached, because every page that shows a queue or a
+ * count of one needs the same answer and they must not disagree.
+ */
+export const requireRoobetInQueue = cache(async function requireRoobetInQueue() {
+  const settings = await getSettings(["require_roobet_username"]);
+  return settings.require_roobet_username === "true";
+});
 
 /**
  * TODAY'S QUEUE.
@@ -134,8 +153,8 @@ export function onlyDue<T extends { or: any; eq: any }>(
  * Someone is due if any of these is true:
  *   - you have never contacted them (a newly added lead, waiting to be worked)
  *   - their follow-up date has arrived
- *   - they still have no Roobet username, the single biggest blocker, so those
- *     resurface every day until it is filled
+ *   - they still have no Roobet username - only if `require_roobet_username`
+ *     is on, which it is not by default. See onlyDue for why.
  *
  * And in every case, only if you have NOT already contacted them today.
  * Without that last part a finished task stays on the list and ticking it
@@ -163,7 +182,8 @@ export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
       .eq("owner_id", ownerId || me.id)
       // Not already worked today - otherwise ticking one off does nothing.
       .or(`last_contact_at.is.null,last_contact_at.lt.${startToday}`),
-    endToday
+    endToday,
+    await requireRoobetInQueue()
   )
     .order("last_contact_at", { ascending: true, nullsFirst: true })
     .limit(500);
