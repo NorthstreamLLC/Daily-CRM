@@ -14,6 +14,7 @@ import { getChurn } from "@/lib/churn";
 import { ReportControls } from "./ReportControls";
 import { DateRangeWager } from "./DateRangeWager";
 import { RetireUnclaimed } from "./RetireUnclaimed";
+import { WagererTable } from "./WagererTable";
 import { ChurnList } from "../../ChurnList";
 import { AutoSync } from "./AutoSync";
 import { WagerTrend } from "./WagerTrend";
@@ -263,70 +264,7 @@ export default async function WagerPage({
                 }
               />
             ) : (
-              <div className="overflow-x-auto rounded-card border border-line-strong bg-surface shadow-card no-scrollbar">
-                <table className="w-full min-w-[820px] text-left">
-                  <thead>
-                    <tr className="border-b-2 border-line-heavy bg-sunken">
-                      <Th className="w-10">#</Th>
-                      <Th>Roobet username</Th>
-                      <Th>Player</Th>
-                      <Th>Rep</Th>
-                      <Th>Status</Th>
-                      <Th align="right">{reportPeriod.label}</Th>
-                      <Th align="right">All time</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.rows.slice(0, 100).map((r, i) => (
-                      <tr
-                        key={r.username}
-                        className={cn(
-                          "border-b border-line-heavy last:border-0",
-                          i % 2 === 1 && "bg-sunken/40"
-                        )}
-                      >
-                        <td className="tabular px-4 py-2 text-caption text-ink-subtle">
-                          {i + 1}
-                        </td>
-                        <td className="px-4 py-2 text-body font-medium text-ink">
-                          {r.playerId ? (
-                            <Link
-                              href={`/book?player=${r.playerId}`}
-                              className="text-accent underline-offset-2 hover:underline"
-                            >
-                              {r.username}
-                            </Link>
-                          ) : (
-                            r.username
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.handle ?? "—"}
-                          {r.reference && (
-                            <span className="tabular ml-2 text-caption text-ink-subtle">
-                              {r.reference}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.ownerName ?? "—"}
-                        </td>
-                        <td className="px-4 py-2 text-small text-ink-muted">
-                          {r.status ?? "—"}
-                        </td>
-                        <Td strong>{money(r.wagered)}</Td>
-                        <Td muted>{money(r.allTime)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {report.rows.length > 100 && (
-                  <p className="border-t border-line-strong px-4 py-2.5 text-small text-ink-muted">
-                    Showing the top 100 of {report.rows.length.toLocaleString()}. The CSV
-                    has every row.
-                  </p>
-                )}
-              </div>
+              <WagererTable rows={report.rows} periodLabel={reportPeriod.label} />
             )}
           </section>
 

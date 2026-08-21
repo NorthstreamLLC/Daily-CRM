@@ -1,64 +1,98 @@
 "use client";
 
-import { useState } from "react";
-import type { HistoryPoint, WagerHistory, HistoryGrain } from "@/lib/admin";
+import { useMemo, useState } from "react";
+import type { WagerHistory, HistoryGrain } from "@/lib/admin";
 import { cn } from "@/components/ui";
+import { ArrowDown, ArrowUp } from "@/components/icons";
 
 const GRAINS: { key: HistoryGrain; label: string }[] = [
-  { key: "day", label: "Day" },
-  { key: "week", label: "Week" },
-  { key: "month", label: "Month" },
+  { key: "day", label: "By day" },
+  { key: "week", label: "By week" },
+  { key: "month", label: "By month" },
 ];
 
-const money = (n: number) => {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}m`;
-  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
-  return `$${Math.round(n)}`;
-};
+type SortKey = "start" | "total" | "wagerers" | "average";
 
-const exact = (n: number) =>
+const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 /**
- * WAGERED OVER TIME.
+ * WAGERED OVER TIME - the numbers, with the chart as a sidebar.
  *
- * Replaces the "Month by month" table, which showed a single row - true, and
- * useless, because syncing started this month. The daily figures were being
- * stored the whole time and nothing read them.
+ * The first version of this was a bar chart and nothing else, which answered
+ * "is it going up" and no other question. What is actually wanted is which
+ * days and which months were the good ones - and you cannot read "the third
+ * Saturday was the best day this month" off forty bars, you have to sort a
+ * column.
  *
- * Bars rather than a line: these are discrete periods, each one a fact Roobet
- * returned for that exact window, not a continuous measurement sampled over
- * time. A line would imply values between the points that do not exist.
- *
- * No charting library. Thirty divs with a height do this correctly, and the
- * page already loads enough.
+ * So the table is the feature and the chart is context. Sort by total to find
+ * the best periods, by date to read it as a timeline.
  */
 export function WagerTrend({ history }: { history: WagerHistory }) {
   const [grain, setGrain] = useState<HistoryGrain>("day");
-  const [hover, setHover] = useState<number | null>(null);
+  const [sort, setSort] = useState<SortKey>("start");
+  const [desc, setDesc] = useState(true);
 
   const points = history[grain];
-  const max = Math.max(1, ...points.map((p) => p.total));
-  const shown = hover !== null ? points[hover] : null;
 
-  /* The most recent period is still running - today is not over, and neither
-     is this week or month. Drawn faded so a half-finished bar is not read as
-     a collapse in wagering, which is the one thing this chart could otherwise
-     say loudly and wrongly every single morning. */
-  const lastIndex = points.length - 1;
+  const rows = useMemo(() => {
+    const withAvg = points.map((p) => ({
+      ...p,
+      average: p.wagerers > 0 ? p.total / p.wagerers : 0,
+    }));
+    const dir = desc ? -1 : 1;
+    return withAvg.sort((a, b) => {
+      if (sort === "start") return a.start.localeCompare(b.start) * dir;
+      return (a[sort] - b[sort]) * dir;
+    });
+  }, [points, sort, desc]);
+
+  const max = Math.max(1, ...points.map((p) => p.total));
+  const totalAll = points.reduce((a, p) => a + p.total, 0);
+  const best = points.reduce(
+    (a, p) => (p.total > (a?.total ?? -1) ? p : a),
+    points[0]
+  );
+
+  /* The last period is still running - today is not over, and neither is this
+     week or month. Marked, because a half-finished period read as a finished
+     one says "wagering collapsed" every single morning. */
+  const runningStart = points[points.length - 1]?.start;
+
+  function toggle(key: SortKey) {
+    if (sort === key) setDesc((d) => !d);
+    else {
+      setSort(key);
+      setDesc(true);
+    }
+  }
+
+  const Th = ({ label, k }: { label: string; k: SortKey }) => (
+    <th className="px-4 py-2 text-right">
+      <button
+        type="button"
+        onClick={() => toggle(k)}
+        className={cn(
+          "inline-flex items-center gap-1 text-label font-semibold uppercase tracking-wide",
+          sort === k ? "text-ink" : "text-ink-subtle hover:text-ink"
+        )}
+      >
+        {label}
+        {sort === k &&
+          (desc ? <ArrowDown size={11} /> : <ArrowUp size={11} />)}
+      </button>
+    </th>
+  );
 
   return (
-    <div className="rounded-card border border-line bg-surface p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div className="rounded-card border border-line bg-surface">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-3">
         <div className="inline-flex rounded-control border border-line-strong p-0.5">
           {GRAINS.map((g) => (
             <button
               key={g.key}
               type="button"
-              onClick={() => {
-                setGrain(g.key);
-                setHover(null);
-              }}
+              onClick={() => setGrain(g.key)}
               className={cn(
                 "rounded px-2.5 py-1 text-small font-medium transition-colors duration-fast",
                 grain === g.key
@@ -71,17 +105,17 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
           ))}
         </div>
 
-        {shown ? (
+        {points.length > 0 && (
           <p className="text-small text-ink-muted">
-            <span className="font-medium text-ink">{shown.label}</span> ·{" "}
-            <span className="tabular font-semibold text-ink">{exact(shown.total)}</span> ·{" "}
-            <span className="tabular">{shown.wagerers.toLocaleString()}</span> wagering
-          </p>
-        ) : (
-          <p className="text-small text-ink-subtle">
-            {points.length > 0
-              ? `${points.length} ${grain}${points.length === 1 ? "" : "s"} on record — hover a bar`
-              : "Nothing on record yet"}
+            Best {grain}:{" "}
+            <span className="font-medium text-ink">{best?.label}</span> at{" "}
+            <span className="tabular font-semibold text-ink">
+              {money(best?.total ?? 0)}
+            </span>
+            <span className="mx-2 text-ink-subtle">·</span>
+            <span className="tabular">{money(totalAll)}</span> over{" "}
+            {points.length} {grain}
+            {points.length === 1 ? "" : "s"}
           </p>
         )}
       </div>
@@ -92,45 +126,75 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
         </p>
       ) : (
         <>
-          <div className="flex h-40 items-end gap-[3px]">
-            {points.map((p, i) => (
-              <button
+          {/* Shape first, so a glance still works. */}
+          <div className="flex h-20 items-end gap-[2px] px-3 pt-3">
+            {points.map((p) => (
+              <span
                 key={p.start}
-                type="button"
-                aria-label={`${p.label}: ${exact(p.total)}`}
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(null)}
-                onFocus={() => setHover(i)}
-                onBlur={() => setHover(null)}
-                className="group relative flex-1 rounded-t-sm transition-colors duration-fast"
-                style={{ height: "100%" }}
-              >
-                <span
-                  className={cn(
-                    "absolute bottom-0 left-0 right-0 rounded-t-sm transition-colors duration-fast",
-                    hover === i
-                      ? "bg-accent"
-                      : i === lastIndex
-                        ? "bg-accent/35"
-                        : "bg-accent/70 group-hover:bg-accent"
-                  )}
-                  style={{
-                    // A zero period still gets a hairline, so a gap in the data
-                    // is visibly different from a day nobody wagered.
-                    height: `${Math.max(p.total > 0 ? 2 : 1, (p.total / max) * 100)}%`,
-                  }}
-                />
-              </button>
+                title={`${p.label} — ${money(p.total)}`}
+                className={cn(
+                  "flex-1 rounded-t-sm",
+                  p.start === runningStart ? "bg-accent/30" : "bg-accent/60"
+                )}
+                style={{ height: `${Math.max(p.total > 0 ? 2 : 1, (p.total / max) * 100)}%` }}
+              />
             ))}
           </div>
 
-          <div className="mt-2 flex justify-between text-caption text-ink-subtle">
-            <span>{points[0]?.label}</span>
-            <span className="tabular">peak {money(max)}</span>
-            <span>
-              {points[lastIndex]?.label}
-              <span className="ml-1 opacity-60">(still running)</span>
-            </span>
+          <div className="overflow-x-auto no-scrollbar">
+            <table className="w-full min-w-[520px] text-left">
+              <thead>
+                <tr className="border-y border-line bg-sunken">
+                  <th className="px-4 py-2 text-label font-semibold uppercase tracking-wide text-ink-subtle">
+                    <button
+                      type="button"
+                      onClick={() => toggle("start")}
+                      className={cn(
+                        "inline-flex items-center gap-1",
+                        sort === "start" ? "text-ink" : "hover:text-ink"
+                      )}
+                    >
+                      Period
+                      {sort === "start" &&
+                        (desc ? <ArrowDown size={11} /> : <ArrowUp size={11} />)}
+                    </button>
+                  </th>
+                  <Th label="Wagering" k="wagerers" />
+                  <Th label="Average each" k="average" />
+                  <Th label="Total wagered" k="total" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr
+                    key={r.start}
+                    className={cn(
+                      "border-b border-line last:border-0",
+                      i % 2 === 1 && "bg-sunken/35",
+                      r.start === runningStart && "italic"
+                    )}
+                  >
+                    <td className="px-4 py-2 text-body font-medium text-ink">
+                      {r.label}
+                      {r.start === runningStart && (
+                        <span className="ml-2 text-caption not-italic text-ink-subtle">
+                          still running
+                        </span>
+                      )}
+                    </td>
+                    <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
+                      {r.wagerers.toLocaleString()}
+                    </td>
+                    <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
+                      {money(r.average)}
+                    </td>
+                    <td className="tabular px-4 py-2 text-right text-body font-semibold text-ink">
+                      {money(r.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
