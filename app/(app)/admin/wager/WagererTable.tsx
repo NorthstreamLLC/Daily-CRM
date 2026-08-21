@@ -152,8 +152,15 @@ export function WagererTable({
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-small text-ink-muted">
-                    {r.ownerName ?? "—"}
+                  {/* An unclaimed row is a statement of fact, not a task.
+                      Assigning happens in the Book, so this says so plainly
+                      rather than looking like a link that does nothing. */}
+                  <td className="px-4 py-2 text-small">
+                    {r.ownerName ? (
+                      <span className="text-ink-muted">{r.ownerName}</span>
+                    ) : (
+                      <span className="text-ink-subtle">No rep</span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-small text-ink-muted">
                     {r.status ?? "—"}

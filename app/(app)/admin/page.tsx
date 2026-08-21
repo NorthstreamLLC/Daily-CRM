@@ -1,11 +1,49 @@
 import Link from "next/link";
-import { Badge, Card, EmptyState, SectionHeader, cn } from "@/components/ui";
+import { Badge, Card, EmptyState, Notice, SectionHeader, cn } from "@/components/ui";
 import { AlertTriangle, Check, ChevronRight, History, TrendingUp, UserCheck, Users, Wallet } from "@/components/icons";
 import { getMe } from "@/lib/queries";
-import { getRecentAudit } from "@/lib/admin";
+import { getRecentAudit, getWagerOverview } from "@/lib/admin";
+import { getChurn } from "@/lib/churn";
+import { ChurnList } from "../ChurnList";
 import { getLeaderboard, resolveRange } from "@/lib/stats";
 import { formatDateTime, ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
+
+
+const money = (n: number) =>
+  "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+/** Same card as the Wager page uses, so the two read alike. */
+function Total({
+  label,
+  value,
+  emphasis,
+  plain,
+  plainSub,
+}: {
+  label: string;
+  value: number;
+  emphasis?: boolean;
+  plain?: boolean;
+  plainSub?: string;
+}) {
+  return (
+    <Card className={cn(emphasis && "border-accent/30")}>
+      <p className="text-label font-medium uppercase tracking-wide text-ink-subtle">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "tabular mt-1.5 text-metric font-semibold",
+          emphasis ? "text-accent" : "text-ink"
+        )}
+      >
+        {plain ? value.toLocaleString() : money(value)}
+      </p>
+      {plainSub && <p className="mt-0.5 text-caption text-ink-subtle">{plainSub}</p>}
+    </Card>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +82,11 @@ export default async function AdminOverview({
     "today"
   );
 
-  const [rows, audit] = await Promise.all([
+  const [rows, audit, churn, wagerOverview] = await Promise.all([
     getLeaderboard(me, range),
     getRecentAudit(8),
+    getChurn(me.timezone),
+    getWagerOverview(me.timezone, "", 1),
   ]);
 
   const totals = rows.reduce(
@@ -213,6 +253,261 @@ export default async function AdminOverview({
           </div>
         )}
       </section>
+
+      {/* WHAT NEEDS ATTENTION.
+
+          Moved here from the Wager page, which was trying to be two things at
+          once: a set of figures to check, and a set of lists to work. Seven
+          sections stacked with no separation between "how much money" and
+          "who needs chasing" is why it read as a mess.
+
+          Wager answers how much. This answers who. */}
+      {/* Falling away - the company view */}
+      <section className="mb-8">
+        <SectionHeader
+          title="Falling away"
+          count={churn.quiet.length + churn.dropping.length}
+          hint={`Players wagering below their own recent normal, comparing the last ${churn.windowDays} days with the ${churn.windowDays} before. ${money(
+            churn.atRisk
+          )} of wager at risk. Comparing ${churn.basisLabel}.`}
+          action={
+            <Link
+              href="/admin/settings"
+              className="text-small font-medium text-accent underline-offset-2 hover:underline"
+            >
+              Adjust thresholds
+            </Link>
+          }
+        />
+
+        {churn.watched.length > 0 && (
+          <div className="mb-4">
+            <p className="mb-2 text-small font-semibold text-ink">
+              Watched by a rep
+              <span className="tabular ml-2 font-normal text-accent">
+                {churn.watched.length}
+              </span>
+            </p>
+            <ChurnList
+              players={churn.watched}
+              kind="watched"
+              windowDays={churn.windowDays}
+              showOwner
+              allowWatch
+              limit={20}
+            />
+          </div>
+        )}
+
+        {churn.quiet.length === 0 && churn.dropping.length === 0 ? (
+          <EmptyState
+            icon={<TrendingUp size={18} />}
+            title="Nobody is falling away"
+            body="Players appear here when their wagering drops sharply against their own recent normal - a warning long before they would ever be marked dead."
+          />
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <p className="mb-2 text-small font-semibold text-ink">
+                Gone quiet
+                <span className="tabular ml-2 font-normal text-danger">
+                  {churn.quiet.length}
+                </span>
+              </p>
+              <ChurnList
+                players={churn.quiet}
+                kind="quiet"
+                windowDays={churn.windowDays}
+                showOwner
+                allowWatch
+                limit={10}
+              />
+            </div>
+            <div>
+              <p className="mb-2 text-small font-semibold text-ink">
+                Wagering less
+                <span className="tabular ml-2 font-normal text-warning">
+                  {churn.dropping.length}
+                </span>
+              </p>
+              <ChurnList
+                players={churn.dropping}
+                kind="dropping"
+                windowDays={churn.windowDays}
+                showOwner
+                allowWatch
+                limit={10}
+              />
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Deposit signals */}
+      <section className="mb-8">
+        <SectionHeader
+          title="Deposit signals"
+          hint="Roobet doesn't expose deposits — but nobody wagers without one. A player's first wager on your codes is a dated deposit confirmation. Admin-only; reps keep logging FTDs as normal."
+        />
+
+        {wagerOverview.signals.baseline ? (
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <Total
+              label="Wagering players — all time"
+              value={wagerOverview.signals.allTimeWagerers}
+              plain
+              emphasis
+            />
+            <Total
+              label={`New since ${wagerOverview.signals.baseline}`}
+              value={wagerOverview.signals.newSinceBaseline ?? 0}
+              plain
+              plainSub="First wager after tracking began"
+            />
+            <Total
+              label="New this month"
+              value={wagerOverview.signals.newMonth ?? 0}
+              plain
+              plainSub="Excludes pre-existing players"
+            />
+          </div>
+        ) : (
+          <>
+            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+              <Total
+                label="Wagering players — all time"
+                value={wagerOverview.signals.allTimeWagerers}
+                plain
+                emphasis
+              />
+              <Card>
+                <p className="text-label font-medium uppercase tracking-wide text-ink-subtle">
+                  New players
+                </p>
+                <p className="mt-1.5 text-body text-ink-muted">
+                  Needs a baseline date
+                </p>
+                <Link
+                  href="/admin/settings"
+                  className="mt-1 inline-block text-small font-medium text-accent
+                             underline-offset-2 hover:underline"
+                >
+                  Set it in Settings →
+                </Link>
+              </Card>
+            </div>
+            <div className="mb-4">
+              <Notice tone="neutral">
+                Counting &ldquo;new&rdquo; players needs a start date. Everyone
+                already wagering when you began tracking arrived at once from the
+                system&rsquo;s point of view, which is why day and week counts were
+                meaningless. Set{" "}
+                <span className="font-medium">New-player baseline date</span> in
+                Settings — August 1st, say — and only first wagers after it count as
+                new business.
+              </Notice>
+            </div>
+          </>
+        )}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Missed FTDs */}
+          <Card padded={false}>
+            <div className="border-b border-line px-4 py-3">
+              <p className="text-body font-semibold text-ink">
+                Wagering, never marked deposited
+                <span className="tabular ml-2 text-small font-normal text-warning">
+                  {wagerOverview.signals.missed.count}
+                </span>
+              </p>
+              <p className="mt-0.5 text-caption text-ink-subtle">
+                Money on the table — these are almost certainly FTDs nobody logged.
+                Worth a status update.
+              </p>
+            </div>
+            {wagerOverview.signals.missed.sample.length === 0 ? (
+              <p className="px-4 py-4 text-small text-ink-muted">
+                Nobody — every wagering player is marked as deposited.
+              </p>
+            ) : (
+              <ul>
+                {wagerOverview.signals.missed.sample.map((p) => (
+                  <li key={p.id} className="border-b border-line last:border-0">
+                    <Link
+                      href={`/book?owner=${p.ownerId}&q=${encodeURIComponent(p.reference)}`}
+                      className="flex items-center justify-between gap-3 px-4 py-3
+                                 transition-colors duration-fast hover:bg-sunken"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-body font-medium text-ink">
+                          {p.handle}
+                        </span>
+                        <span className="tabular block text-caption text-ink-subtle">
+                          {p.reference} · {p.ownerName} · {p.status}
+                        </span>
+                      </span>
+                      <span className="tabular shrink-0 text-body font-semibold text-ink">
+                        {money(p.wager)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          {/* Unverified FTDs */}
+          <Card padded={false}>
+            <div className="border-b border-line px-4 py-3">
+              <p className="text-body font-semibold text-ink">
+                Marked deposited, no wager seen
+                <span className="tabular ml-2 text-small font-normal text-ink-subtle">
+                  {wagerOverview.signals.unverified.count}
+                </span>
+              </p>
+              <p className="mt-0.5 text-caption text-ink-subtle">
+                Logged as FTDs but nothing on your codes yet. Often a missing or
+                typo'd Roobet username rather than a false claim.
+              </p>
+            </div>
+            {wagerOverview.signals.unverified.sample.length === 0 ? (
+              <p className="px-4 py-4 text-small text-ink-muted">
+                Nobody — every logged FTD shows wager on your codes.
+              </p>
+            ) : (
+              <ul>
+                {wagerOverview.signals.unverified.sample.map((p) => (
+                  <li key={p.id} className="border-b border-line last:border-0">
+                    {/* Straight to their row in the Book, where the Roobet
+                        username field is one click away in Edit. */}
+                    <Link
+                      href={`/book?owner=${p.ownerId}&q=${encodeURIComponent(p.reference)}`}
+                      className="flex items-center justify-between gap-3 px-4 py-3
+                                 transition-colors duration-fast hover:bg-sunken"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-body font-medium text-ink">
+                          {p.handle}
+                        </span>
+                        <span className="tabular block text-caption text-ink-subtle">
+                          {p.reference} · {p.ownerName} · {p.status}
+                        </span>
+                      </span>
+                      <span className="shrink-0 whitespace-nowrap rounded-control border
+                                       border-line-strong px-2.5 py-1 text-small
+                                       font-medium text-accent">
+                        Add username →
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      </section>
+
+
 
       <section>
         <SectionHeader
