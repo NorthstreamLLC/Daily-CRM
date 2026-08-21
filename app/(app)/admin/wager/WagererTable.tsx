@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import type { ReportRow } from "@/lib/admin";
 import { cn } from "@/components/ui";
 import { ChevronLeft, ChevronRight, Search, X } from "@/components/icons";
-import { WatchWagerer } from "./WatchWagerer";
+import { WagererMenu } from "./WagererMenu";
 
 const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -139,9 +139,6 @@ export function WagererTable({
             <thead>
               <tr className="border-b-2 border-line-heavy bg-sunken">
                 <Th className="w-10">#</Th>
-                <Th className="w-10">
-                  <span className="sr-only">Watch</span>
-                </Th>
                 <Th>Roobet username</Th>
                 <Th>Player</Th>
                 <Th>Rep</Th>
@@ -155,29 +152,28 @@ export function WagererTable({
                 <tr
                   key={r.username}
                   className={cn(
-                    "group border-b border-line-heavy last:border-0",
+                    "border-b border-line-heavy last:border-0",
                     i % 2 === 1 && "bg-sunken/40"
                   )}
                 >
                   <td className="tabular px-4 py-2 text-caption text-ink-subtle">
                     {start + i + 1}
                   </td>
-                  {/* The watch flag. Hidden until the row is hovered unless it
-                      is already set, so 100 rows are not 100 icons. */}
-                  <td className="py-2 pl-2 pr-0">
-                    <WatchWagerer username={r.username} watching={r.watched} />
-                  </td>
-                  <td className="px-4 py-2 text-body font-medium text-ink">
-                    {r.playerId ? (
-                      <Link
-                        href={`/book?player=${r.playerId}`}
-                        className="text-accent underline-offset-2 hover:underline"
-                      >
-                        {r.username}
-                      </Link>
-                    ) : (
-                      r.username
-                    )}
+                  {/* The username IS the control. Everything you might do
+                      about this person is behind it - watching, opening their
+                      book entry, seeing their figures side by side. */}
+                  <td className="px-4 py-2">
+                    <WagererMenu
+                      username={r.username}
+                      watching={r.watched}
+                      playerId={r.playerId}
+                      handle={r.handle}
+                      ownerName={r.ownerName}
+                      status={r.status}
+                      periodLabel={periodLabel}
+                      wagered={r.wagered}
+                      allTime={r.allTime}
+                    />
                   </td>
                   <td className="px-4 py-2 text-small text-ink-muted">
                     {r.handle ?? "—"}
