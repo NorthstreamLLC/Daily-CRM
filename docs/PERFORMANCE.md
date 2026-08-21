@@ -111,3 +111,79 @@ header, which names the region that served it. It should say `pdx1`.
 Watch out for **cold starts** when judging this: the first click after a few
 minutes idle includes the function booting, which is its own second or so and
 has nothing to do with any of the above. Judge from the second click onward.
+
+---
+
+# The 8.6 second wager page, and how it was actually found
+
+Kept because the process matters more than the fix.
+
+## What did not work
+
+Three confident diagnoses, from reading code, all wrong:
+
+1. **The Vercel region.** Flagged repeatedly as the likely cause. It was
+   already `pdx1` and correct. Distance was never the problem.
+2. **`wager_all_history`.** Looked expensive — aggregates every day, week and
+   month row. Measured 616ms.
+3. **The ledger downloads.** `getWagerOverview` fetched up to 300,000 rows
+   twice per page load and folded them in JavaScript. Obviously wasteful, and
+   a whole migration was written for it. Measured 539ms and 343ms.
+
+Each theory was plausible. Each cost a deploy and a migration. None moved the
+number.
+
+## What worked
+
+Printing the timings on the page.
+
+```
+overview 8710ms · extDay 8377ms · extWeek 8377ms · extMonth 8377ms ·
+periods 616ms · churn 578ms · report 567ms · ledgerLatest 539ms · ...
+```
+
+Three identical timings, everything else under 620ms. One function, called
+three times. It took one reload to find what a week of reading had missed.
+
+## The bug
+
+`wager_external_deltas` ran **three correlated subqueries per (username, code)
+pair** — the baseline before the window, and the first and last readings
+inside it.
+
+The index matched perfectly. That is what made it invisible: it was not a
+missing index, it was a shape that multiplies by the number of rows. About 860
+pairs × 3 subqueries ≈ 2,600 index lookups per call, each re-evaluating the
+row-security policy, three calls per page load.
+
+Rewritten as three `DISTINCT ON` passes joined together. **8,719ms → 886ms.**
+
+The identical pattern existed in `wager_deltas` over `wager_snapshots`, sitting
+at a harmless-looking 507ms because there were 251 players. It was fixed at the
+same time, along with the indexes that table had never had.
+
+## The lesson
+
+> A query shape that looks reasonable and multiplies by row count is invisible
+> to code review and obvious to a stopwatch.
+
+`RenderStamp` and `timed()` in `app/(app)/RenderStamp.tsx` are admin-only, cost
+nothing, and stay. When something feels slow, read the footer before forming a
+theory.
+
+## What else came out of it
+
+- **Nothing pruned `wager_snapshots`** — a row every 30 minutes per matched
+  player per code, forever. `prune_wager_snapshots` now runs in the nightly
+  cron. It keeps the most recent row per (player, source) regardless of age:
+  that row *is* the player's all-time figure, so pruning it would silently zero
+  the lifetime wager of anyone dormant.
+- **The Wager page ran eleven queries to render three numbers**, two of which
+  only answered "is there any data yet?" — which the period totals already
+  answer. It now asks for the one count it needs.
+
+## Where it stands
+
+886ms across nineteen round trips, none dominant. The remaining lever is doing
+fewer queries or caching them for the 30 minutes between syncs — not
+optimisation, and not worth it until it hurts.
