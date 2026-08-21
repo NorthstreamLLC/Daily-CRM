@@ -49,6 +49,12 @@ export function WagererTable({
 
   const searching = query.trim().length > 0;
 
+  /* When the chosen period IS all time, the period column and the all-time
+     column are the same number by definition - two columns headed "ALL TIME"
+     showing identical figures. Any other period they differ, which is the
+     whole point of showing both. */
+  const periodIsAllTime = periodLabel.trim().toLowerCase() === "all time";
+
   /* Paged rather than cut off at 100.
 
      "Showing the top 100 of 415" is a dead end: the other 315 exist, they are
@@ -137,7 +143,7 @@ export function WagererTable({
                 <Th>Rep</Th>
                 <Th>Status</Th>
                 <Th align="right">{periodLabel}</Th>
-                <Th align="right">All time</Th>
+                {!periodIsAllTime && <Th align="right">All time</Th>}
               </tr>
             </thead>
             <tbody>
@@ -188,9 +194,11 @@ export function WagererTable({
                   <td className="tabular px-4 py-2.5 text-right text-body font-semibold text-ink">
                     {money(r.wagered)}
                   </td>
-                  <td className="tabular px-4 py-2.5 text-right text-body text-ink-subtle">
-                    {money(r.allTime)}
-                  </td>
+                  {!periodIsAllTime && (
+                    <td className="tabular px-4 py-2.5 text-right text-body text-ink-subtle">
+                      {money(r.allTime)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
