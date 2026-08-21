@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { TaskRow } from "./TaskRow";
 import { AddPlayer } from "./AddPlayer";
 import { ViewAs } from "../ViewAs";
+import { RenderStamp } from "../RenderStamp";
 import { TodayTabs } from "./TodayTabs";
 import { createClient } from "@/lib/supabase/server";
 import { EmptyState, cn } from "@/components/ui";
@@ -229,6 +230,8 @@ export default async function TodayPage({
   const comingTotalPromise = settingsPromise.then((s) =>
     countComingUp(me, Number(s.coming_up_window_days) || 7, ownerId)
   );
+
+  const startedAt = Date.now();
 
   const [settings, dueNow, comingUp, comingTotal, deadTotal, stats, targets, statuses, sources, churn, teamRes, ownerRes] =
     await Promise.all([
@@ -562,6 +565,9 @@ export default async function TodayPage({
         Times shown in {me.timezone.replace("_", " ")} — your own time zone decides what
         &ldquo;today&rdquo; means.
       </p>
+
+      {/* Admins only: instrumentation, not something a rep needs to see. */}
+      {isAdmin && <RenderStamp ms={Date.now() - startedAt} label="Today" />}
     </>
   );
 }

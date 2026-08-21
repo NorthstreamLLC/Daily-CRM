@@ -18,6 +18,7 @@ import { WagererTable } from "./WagererTable";
 import { ChurnList } from "../../ChurnList";
 import { AutoSync } from "./AutoSync";
 import { WagerTrend } from "./WagerTrend";
+import { RenderStamp } from "../../RenderStamp";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,8 @@ export default async function WagerPage({
   /* All seven in one pass. These were three sequential awaits, which on a
      page already doing a dozen queries meant three full round trips stacked
      end to end for no reason - none of them needs another's answer. */
+  const startedAt = Date.now();
+
   const [overview, report, churn, periods, team, repPeriods] =
     await Promise.all([
       getWagerOverview(me.timezone, "", 1),
@@ -361,6 +364,8 @@ export default async function WagerPage({
 
         </>
       )}
+
+      <RenderStamp ms={Date.now() - startedAt} label="Wager" />
     </>
   );
 }
