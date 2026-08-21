@@ -201,7 +201,25 @@ grant execute on function public.watched_wagerers() to authenticated;
 -- Reprinted whole rather than patched, because a function is replaced, not
 -- edited - and the two lines that changed are marked below.
 -- ---------------------------------------------------------------------------
-drop function if exists public.churn_players(uuid, integer, integer, numeric, integer);
+/* Dropped by looking the signature UP rather than typing it out.
+
+   The first version of this line guessed (uuid, integer, integer, numeric,
+   integer) - p_drop is numeric, not integer - so `drop if exists` matched
+   nothing, silently, and the create that followed failed with "already exists
+   with same argument types". A drop that quietly does nothing is worse than
+   one that errors. */
+do $$
+declare r record;
+begin
+  for r in
+    select oid::regprocedure as sig
+      from pg_proc
+     where proname = 'churn_players'
+       and pronamespace = 'public'::regnamespace
+  loop
+    execute format('drop function if exists %s', r.sig);
+  end loop;
+end $$;
 
 create function public.churn_players(
   p_owner uuid    default null,
@@ -317,5 +335,5 @@ as $$
   order by (coalesce(pr.prev, 0) - coalesce(pr.cur, 0)) desc
   limit greatest(1, least(coalesce(p_limit, 40), 200));
 $$;
-revoke all on function public.churn_players(uuid, integer, integer, numeric, integer) from public;
-grant execute on function public.churn_players(uuid, integer, integer, numeric, integer) to authenticated;
+revoke all on function public.churn_players(uuid, integer, numeric, numeric, integer) from public;
+grant execute on function public.churn_players(uuid, integer, numeric, numeric, integer) to authenticated;
