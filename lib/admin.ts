@@ -1283,6 +1283,8 @@ export type ReportRow = {
   ownerName: string | null;
   status: string | null;
   allTime: number;
+  /** On the watch list - flagged as one to keep an eye on. */
+  watched: boolean;
 };
 
 export type WagerReport = {
@@ -1316,7 +1318,7 @@ export async function getWagerReport(
      top 500 only - disagreeing with the headline cards on the same page, which
      are a real aggregate. A total is a property of the data, not of the page
      size. */
-  const [{ data }, { data: totalsData }] = await Promise.all([
+  const [{ data }, { data: totalsData }, { data: watchRows }] = await Promise.all([
     supabase.rpc("wager_report_rows", {
       ...args,
       p_owner: ownerId ?? null,
@@ -1326,7 +1328,16 @@ export async function getWagerReport(
       ...args,
       p_owner: ownerId ?? null,
     }),
+    /* Who is flagged. A small list - watches are deliberate, so this is tens
+       of rows, not thousands. */
+    supabase.from("vip_watch").select("username").is("resolved_at", null),
   ]);
+
+  const watched = new Set(
+    ((watchRows ?? []) as { username: string }[]).map((w) =>
+      String(w.username).trim().toLowerCase()
+    )
+  );
 
   const raw = (data ?? []) as {
     username: string;
@@ -1352,6 +1363,7 @@ export async function getWagerReport(
     ownerName: r.owner_name,
     status: r.status,
     allTime: Number(r.all_time),
+    watched: watched.has(String(r.username).trim().toLowerCase()),
   }));
 
   /* Fall back to the old row-derived figures only if the totals function is

@@ -819,6 +819,17 @@ export async function addPlayer(
  * Row Level Security decides who may pin whom: a rep their own players, an
  * admin anyone's.
  */
+/**
+ * WATCH A PLAYER, by their Roobet username.
+ *
+ * vip_watch is keyed on username rather than player id (migration 036), so the
+ * same list covers somebody in a rep's book and somebody wagering on the codes
+ * that nobody has ever claimed - which is 860 of the 880.
+ *
+ * Keeping the playerId signature: every caller already has a player, and the
+ * username is looked up from it. Callers who only have a username use
+ * setWagererWatch below.
+ */
 export async function setVipWatch(
   playerId: string,
   watching: boolean,
@@ -829,39 +840,63 @@ export async function setVipWatch(
 
   const supabase = createClient();
 
-  if (!watching) {
-    /* Resolved rather than deleted - "we watched them and they came back" is
-       worth keeping. */
-    const { error } = await supabase
-      .from("vip_watch")
-      .update({ resolved_at: new Date().toISOString() })
-      .eq("player_id", playerId)
-      .is("resolved_at", null);
+  const { data: player } = await supabase
+    .from("players")
+    .select("roobet_username")
+    .eq("id", playerId)
+    .maybeSingle();
 
-    if (error) return { error: watchError(error.message) };
-    refresh();
-    return { message: "Off the watch list." };
+  const username = (player?.roobet_username ?? "").trim();
+  if (!username) {
+    return {
+      error:
+        "This player has no Roobet username yet, so there is nothing to track " +
+        "their wagering against. Add one first.",
+    };
   }
 
-  const { error } = await supabase.from("vip_watch").upsert(
-    {
-      player_id: playerId,
-      added_by: me.id,
-      added_at: new Date().toISOString(),
-      note: note?.trim() || null,
-      resolved_at: null,
-    },
-    { onConflict: "player_id" }
-  );
+  return setWagererWatch(username, watching, note);
+}
+
+/**
+ * WATCH A ROOBET USERNAME, whether or not anyone owns them.
+ *
+ * This is the one the Wager page uses: the whole point is flagging a wagerer
+ * who is in nobody's book, so there is no player to key on and no owner to
+ * scope by. Admin only, enforced in the function itself.
+ */
+export async function setWagererWatch(
+  username: string,
+  watching: boolean,
+  note?: string
+): Promise<{ error?: string; message?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+  if (me.role !== "admin") return { error: "Only admins manage the watch list." };
+
+  const trimmed = username.trim();
+  if (!trimmed) return { error: "No username given." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("set_wagerer_watch", {
+    p_username: trimmed,
+    p_watching: watching,
+    p_note: note?.trim() || null,
+  });
 
   if (error) return { error: watchError(error.message) };
+
   refresh();
-  return { message: "Added to the watch list." };
+  return {
+    message: watching
+      ? `${trimmed} added to the watch list.`
+      : `${trimmed} taken off the watch list.`,
+  };
 }
 
 function watchError(message: string) {
   return /does not exist|schema cache/i.test(message)
-    ? "Run migration 20260812000020_vip_watch.sql first."
+    ? "Run migration 20260812000036_watch_by_username.sql first."
     : message;
 }
 
