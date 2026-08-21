@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient, serviceRoleHelp } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/admin";
-import { resolveStatus, parseCsv, guessMapping, parseDate, isBlankRow } from "@/lib/csv";
+import {
+  resolveStatus,
+  parseCsv,
+  guessMapping,
+  parseDate,
+  isBlankRow,
+  isRepeatedHeader,
+} from "@/lib/csv";
 
 export type AdminState = { error?: string; message?: string; warning?: string } | null;
 
@@ -710,6 +717,14 @@ export async function previewImport(
       return;
     }
 
+    /* The header again, repeated partway down so it stays readable while
+       scrolling. Seb's book does this. Without it, a player called "Player
+       Handle" with the status "Status" gets created. */
+    if (isRepeatedHeader(cells, headers)) {
+      blankRows += 1;
+      return;
+    }
+
     const handle = get("handle");
     if (!handle) {
       problems.push({ row: rowNumber, reason: "No player handle" });
@@ -913,7 +928,7 @@ export async function runImport(
       mapping[field] !== undefined ? (cells[mapping[field]] ?? "").trim() : "";
 
     // Spreadsheet filler. Not imported, and not counted as a rejection.
-    if (isBlankRow(cells, mapping)) {
+    if (isBlankRow(cells, mapping) || isRepeatedHeader(cells, headers)) {
       blankRows += 1;
       return;
     }
@@ -988,23 +1003,82 @@ export async function runImport(
     });
   });
 
+  /* Push the reference counter past anything already issued BEFORE inserting.
+
+     It used to run only at the end. If the counter was behind - which it is
+     whenever references came from a sheet rather than the trigger, because the
+     trigger is what increments it - then the trigger would hand out a number
+     that already existed and the insert would fail on the unique constraint. */
+  await supabase.rpc("sync_reference_counter", { p_user: targetUserId });
+
   // Inserted in chunks. One 20,000-row statement is a single point of failure;
   // 500 at a time means a problem costs one chunk, not the whole file.
   let imported = 0;
+  let renumbered = 0;
+
   for (let i = 0; i < toInsert.length; i += 500) {
     const chunk = toInsert.slice(i, i + 500);
     const { error, count } = await supabase
       .from("players")
       .insert(chunk, { count: "exact" });
 
-    if (error) {
+    if (!error) {
+      imported += count ?? chunk.length;
+      continue;
+    }
+
+    /* A REFERENCE CLASH IS NOT WORTH LOSING THE IMPORT OVER.
+
+       Keeping the sheet's Player IDs is a courtesy - it means MH-0042 still
+       finds the same person. If one of them is already taken, the right
+       answer is a different number, not sixty-five lost players.
+
+       Seb's book failed exactly this way: "Rows 2-66 failed: duplicate key
+       value violates unique constraint players_reference_key", and nothing
+       imported. So the chunk is retried without the supplied references and
+       the trigger assigns fresh ones. */
+    const clash = /players_reference_key|duplicate key/i.test(error.message);
+
+    if (clash) {
+      const stripped = chunk.map((row) => {
+        const copy = { ...row };
+        delete copy.reference;
+        return copy;
+      });
+
+      const retry = await supabase
+        .from("players")
+        .insert(stripped, { count: "exact" });
+
+      if (!retry.error) {
+        imported += retry.count ?? stripped.length;
+        renumbered += stripped.length;
+        continue;
+      }
+
       rejections.push({
         row: i + 2,
-        reason: `Rows ${i + 2}-${i + chunk.length + 1} failed: ${error.message}`,
+        reason:
+          `Rows ${i + 2}-${i + chunk.length + 1} failed even after renumbering: ` +
+          retry.error.message,
       });
-    } else {
-      imported += count ?? chunk.length;
+      continue;
     }
+
+    rejections.push({
+      row: i + 2,
+      reason: `Rows ${i + 2}-${i + chunk.length + 1} failed: ${error.message}`,
+    });
+  }
+
+  if (renumbered > 0) {
+    rejections.push({
+      row: 0,
+      reason:
+        `${renumbered} player${renumbered === 1 ? "" : "s"} were given new ` +
+        `reference numbers - the IDs in the sheet were already in use. ` +
+        `Everything imported; the numbers just differ from the spreadsheet.`,
+    });
   }
 
   await supabase

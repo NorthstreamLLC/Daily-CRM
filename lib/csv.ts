@@ -219,27 +219,73 @@ const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 /**
  * Is this row empty for our purposes?
  *
- * A spreadsheet's unused rows are rarely actually empty. Moneyheist's book has
- * 1,555 of them after the last real player, each one carrying "0" in three
- * formula columns - DueFlag, ReactivationFlag, UpcomingFlag - because the
- * formula fills down past the data.
+ * A spreadsheet's unused rows are rarely actually empty, and they are empty in
+ * two different ways.
  *
- * A row-is-blank test based on "every cell is empty" therefore sees 1,799 rows
- * where a human sees 244, and every one of the 1,555 becomes a "No player
- * handle" problem. The real problems then sit below fifteen hundred lines of
- * noise, which is the same as not reporting them.
+ * Moneyheist's book had 1,555 rows carrying "0" in formula columns, because
+ * the formula filled down past the data. Seb's book has 135 rows carrying only
+ * a SOURCE - a dropdown he dragged to the bottom of the sheet. Both are
+ * nobody; both were being reported as "No player handle", 135 times, burying
+ * the two problems that mattered.
  *
- * So emptiness is judged only on the columns we actually import. Formula
- * residue in a column we ignore is not data.
+ * So emptiness is judged on the columns only a real person has: a handle, a
+ * Roobet username, a reference, notes, or a date something happened to them.
+ * A source and a status are what the sheet fills in for you.
+ *
+ * A row with no handle but WITH one of those - a note, a username - is not
+ * filler. Somebody lost a name, and that is worth reporting.
  */
+const IDENTITY_FIELDS = [
+  "handle",
+  "roobet_username",
+  "reference",
+  "notes",
+  "last_contact_at",
+  "first_deposit_at",
+];
+
 export function isBlankRow(
   cells: string[],
   mapping: Record<string, number>
 ): boolean {
-  for (const index of Object.values(mapping)) {
-    if ((cells[index] ?? "").trim() !== "") return false;
+  for (const field of IDENTITY_FIELDS) {
+    const index = mapping[field];
+    if (index === undefined) continue;
+    const value = (cells[index] ?? "").trim();
+    if (value === "") continue;
+
+    /* A reference is a code, not prose.
+
+       Seb's book ends with a legend - "Sent to VIP Team - players you've
+       personally handed off..." - sitting in the Player ID column. Treating
+       that as identity made the row look like a player who had lost their
+       name. Anything with a space in it, or longer than a reference could
+       plausibly be, is a note somebody typed. */
+    if (field === "reference" && (value.length > 24 || /\s/.test(value))) {
+      continue;
+    }
+
+    return false;
   }
   return true;
+}
+
+/**
+ * Is this row the header again?
+ *
+ * Long sheets often repeat their header partway down so it stays readable
+ * while scrolling. Seb's book does. Without this it imports as a player
+ * called "Player Handle" whose status is "Status".
+ */
+export function isRepeatedHeader(cells: string[], headers: string[]): boolean {
+  const squashedHeaders = new Set(headers.map((h) => squash(h)).filter(Boolean));
+  let matches = 0;
+  for (const cell of cells) {
+    const value = squash(cell);
+    if (value && squashedHeaders.has(value)) matches++;
+  }
+  // Two or more cells that are themselves column names is not a coincidence.
+  return matches >= 2;
 }
 
 export function guessMapping(headers: string[]): Record<string, number> {
