@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Badge, Card, EmptyState, Notice, SectionHeader, cn } from "@/components/ui";
 import { AlertTriangle, Check, ChevronRight, History, TrendingUp, UserCheck, Users, Wallet } from "@/components/icons";
 import { getMe } from "@/lib/queries";
-import { getRecentAudit, getWagerOverview } from "@/lib/admin";
+import { getDepositSignals, getRecentAudit } from "@/lib/admin";
 import { getChurn } from "@/lib/churn";
 import { ChurnList } from "../ChurnList";
 import { getLeaderboard, resolveRange } from "@/lib/stats";
@@ -86,14 +86,14 @@ export default async function AdminOverview({
   const startedAt = Date.now();
   const timings: { name: string; ms: number }[] = [];
 
-  const [rows, audit, churn, wagerOverview] = await Promise.all([
+  const [rows, audit, churn, signals] = await Promise.all([
     timed("leaderboard", getLeaderboard(me, range), timings),
     timed("audit", getRecentAudit(8), timings),
     timed("churn", getChurn(me.timezone, null), timings),
-    /* This page pulls the wager overview too, for the deposit signals. When
-       that function was fetching the whole ledger it made Overview as slow as
-       Wager - one bad query, two slow pages. */
-    timed("wagerOverview", getWagerOverview(me.timezone, "", 1), timings),
+    /* Just the deposit signals. This used to call getWagerOverview - eleven
+       queries producing per-rep totals, top players and per-code breakdowns
+       that this page does not render - and it was 660ms of a 666ms page. */
+    timed("signals", getDepositSignals(me.timezone), timings),
   ]);
 
   const totals = rows.reduce(
@@ -357,23 +357,23 @@ export default async function AdminOverview({
           hint="Roobet doesn't expose deposits — but nobody wagers without one. A player's first wager on your codes is a dated deposit confirmation. Admin-only; reps keep logging FTDs as normal."
         />
 
-        {wagerOverview.signals.baseline ? (
+        {signals.baseline ? (
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <Total
               label="Wagering players — all time"
-              value={wagerOverview.signals.allTimeWagerers}
+              value={signals.allTimeWagerers}
               plain
               emphasis
             />
             <Total
-              label={`New since ${wagerOverview.signals.baseline}`}
-              value={wagerOverview.signals.newSinceBaseline ?? 0}
+              label={`New since ${signals.baseline}`}
+              value={signals.newSinceBaseline ?? 0}
               plain
               plainSub="First wager after tracking began"
             />
             <Total
               label="New this month"
-              value={wagerOverview.signals.newMonth ?? 0}
+              value={signals.newMonth ?? 0}
               plain
               plainSub="Excludes pre-existing players"
             />
@@ -383,7 +383,7 @@ export default async function AdminOverview({
             <div className="mb-3 grid gap-3 sm:grid-cols-2">
               <Total
                 label="Wagering players — all time"
-                value={wagerOverview.signals.allTimeWagerers}
+                value={signals.allTimeWagerers}
                 plain
                 emphasis
               />
@@ -424,7 +424,7 @@ export default async function AdminOverview({
               <p className="text-body font-semibold text-ink">
                 Wagering, never marked deposited
                 <span className="tabular ml-2 text-small font-normal text-warning">
-                  {wagerOverview.signals.missed.count}
+                  {signals.missed.count}
                 </span>
               </p>
               <p className="mt-0.5 text-caption text-ink-subtle">
@@ -432,13 +432,13 @@ export default async function AdminOverview({
                 Worth a status update.
               </p>
             </div>
-            {wagerOverview.signals.missed.sample.length === 0 ? (
+            {signals.missed.sample.length === 0 ? (
               <p className="px-4 py-4 text-small text-ink-muted">
                 Nobody — every wagering player is marked as deposited.
               </p>
             ) : (
               <ul>
-                {wagerOverview.signals.missed.sample.map((p) => (
+                {signals.missed.sample.map((p) => (
                   <li key={p.id} className="border-b border-line last:border-0">
                     <Link
                       href={`/book?owner=${p.ownerId}&q=${encodeURIComponent(p.reference)}`}
@@ -469,7 +469,7 @@ export default async function AdminOverview({
               <p className="text-body font-semibold text-ink">
                 Marked deposited, no wager seen
                 <span className="tabular ml-2 text-small font-normal text-ink-subtle">
-                  {wagerOverview.signals.unverified.count}
+                  {signals.unverified.count}
                 </span>
               </p>
               <p className="mt-0.5 text-caption text-ink-subtle">
@@ -477,13 +477,13 @@ export default async function AdminOverview({
                 typo'd Roobet username rather than a false claim.
               </p>
             </div>
-            {wagerOverview.signals.unverified.sample.length === 0 ? (
+            {signals.unverified.sample.length === 0 ? (
               <p className="px-4 py-4 text-small text-ink-muted">
                 Nobody — every logged FTD shows wager on your codes.
               </p>
             ) : (
               <ul>
-                {wagerOverview.signals.unverified.sample.map((p) => (
+                {signals.unverified.sample.map((p) => (
                   <li key={p.id} className="border-b border-line last:border-0">
                     {/* Straight to their row in the Book, where the Roobet
                         username field is one click away in Edit. */}

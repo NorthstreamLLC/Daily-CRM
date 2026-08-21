@@ -304,26 +304,6 @@ export async function getImportHistory(): Promise<ImportBatch[]> {
 
 /* ------------------------------------------------------------ Wager stats */
 
-export type WagerByRep = {
-  userId: string;
-  name: string;
-  code: string;
-  matchedPlayers: number;
-  today: number;
-  week: number;
-  month: number;
-  allTime: number;
-};
-
-export type TopWagerPlayer = {
-  id: string;
-  handle: string;
-  reference: string;
-  roobet_username: string | null;
-  ownerName: string;
-  allTime: number;
-  month: number;
-};
 
 export type SignalPlayer = {
   id: string;
@@ -353,41 +333,6 @@ export type DepositSignals = {
   unverified: { count: number; sample: SignalPlayer[] };
 };
 
-export type CodeTotals = {
-  source: string;
-  today: number;
-  week: number;
-  month: number;
-  allTime: number;
-  wagerers: number;
-};
-
-export type UnclaimedWagerer = {
-  username: string;
-  sources: string;
-  month: number;
-  allTime: number;
-};
-
-export type WagerOverview = {
-  /** Company-wide, from the ledger - includes the general book. */
-  totals: { today: number; week: number; month: number; allTime: number };
-  byCode: CodeTotals[];
-  unclaimed: {
-    /** Everyone unclaimed. */
-    count: number;
-    /** How many match the current search. */
-    matching: number;
-    total: number;
-    page: number;
-    pageCount: number;
-    sample: UnclaimedWagerer[];
-  };
-  byRep: WagerByRep[];
-  topPlayers: TopWagerPlayer[];
-  snapshotCount: number;
-  signals: DepositSignals;
-};
 
 /**
  * COMPANY WAGER, cut by window and by rep.
@@ -400,423 +345,18 @@ export type WagerOverview = {
 export const UNCLAIMED_PAGE_SIZE = 50;
 export const UNCLAIMED_MAX_PAGES = 10;
 
-export async function getWagerOverview(
-  timezone: string,
-  /** Filters the unclaimed wagerer list. */
-  search = "",
-  /** 1-based page of the unclaimed list. */
-  page = 1,
-  /* Optional per-query timings. This function does eleven separate things and
-     was 8.4 of the wager page's 8.5 seconds; fixing the two queries that
-     looked obviously wrong changed nothing, which is exactly when you stop
-     guessing and measure inside. */
-  trace?: { name: string; ms: number }[]
-): Promise<WagerOverview> {
-  const mark = async <T,>(name: string, p: Promise<T> | PromiseLike<T>): Promise<T> => {
-    if (!trace) return p as Promise<T>;
-    const t0 = Date.now();
-    try {
-      return await p;
-    } finally {
-      trace.push({ name, ms: Date.now() - t0 });
-    }
-  };
-  const supabase = createClient();
-  const now = new Date();
-  const nowIso = now.toISOString();
+/* getWagerOverview lived here.
 
-  const { startOfDayUtc, startOfDayPlusUtc, ymdInZone, dayStartFromYmd } = await import(
-    "@/lib/time"
-  );
+   It built per-rep totals, per-code breakdowns, top players, the unclaimed
+   list and the deposit signals in one go - eleven queries - and by the end
+   both of its callers used a fraction of that. The Wager page needed one
+   count; Overview needed the signals. Each now asks for what it renders
+   (getUnclaimedCount, getDepositSignals), and this is gone rather than left
+   sitting here as the convenient-looking thing to call next time.
 
-  const todayStart = startOfDayUtc(timezone, now).toISOString();
-  const weekStart = startOfDayPlusUtc(timezone, -6, now).toISOString();
-  const monthYmd = `${ymdInZone(now, timezone).slice(0, 7)}-01`;
-  const monthStart = (dayStartFromYmd(monthYmd, timezone) ?? now).toISOString();
-
-  type Delta = { player_id: string; owner_id: string; delta: number };
-
-  type ExternalDelta = { username: string; source: string; delta: number };
-
-  const externalRpc = (start: string) =>
-    supabase
-      .rpc("wager_external_deltas", { p_start: start, p_end: nowIso })
-      .then((r) => (r.data ?? []) as ExternalDelta[]);
-
-  const [
-    { data: users },
-    { data: players },
-    { count: snapshotCount },
-    firstWagers,
-    ledgerRows,
-    extDay,
-    extWeek,
-    extMonth,
-    dayDeltas,
-    weekDeltas,
-    monthDeltas,
-  ] = await Promise.all([
-    mark("users", supabase.from("users").select("id, name, code").eq("active", true).order("name")),
-    mark(
-      "players",
-      supabase
-        .from("players")
-        .select(
-          "id, handle, reference, roobet_username, owner_id, weighted_wager, status, first_deposit_at"
-        )
-        .limit(100000)
-    ),
-    mark(
-      "snapshotCount",
-      supabase.from("wager_snapshots").select("id", { count: "exact", head: true })
-    ),
-    /* First nonzero wager per username - a dated deposit confirmation.
-
-       Was: fetch up to 300,000 ledger rows ordered by time and keep the first
-       occurrence of each username in JavaScript. Now one DISTINCT ON, which
-       returns about 900 rows instead. */
-    mark(
-      "firstSeen",
-      supabase
-        .rpc("wager_first_seen")
-        .then((r) => (r.data ?? []) as { username: string; first_at: string }[])
-    ),
-
-    /* Latest reading per username per code.
-
-       Was: fetch the ENTIRE ledger - up to 300,000 rows - and fold it down to
-       the last row per pair by hand. Together these two queries were 8.4 of
-       the page's 8.5 seconds, moving 600,000 rows over the network to build
-       two maps Postgres can build from ~2,600. */
-    mark(
-      "ledgerLatest",
-      supabase
-        .rpc("wager_ledger_latest")
-        .then(
-          (r) => (r.data ?? []) as { username: string; source: string; wagered: number }[]
-        )
-    ),
-    mark("extDay", externalRpc(todayStart)),
-    mark("extWeek", externalRpc(weekStart)),
-    mark("extMonth", externalRpc(monthStart)),
-    mark(
-      "deltasDay",
-      supabase
-        .rpc("wager_deltas", { p_start: todayStart, p_end: nowIso })
-        .then((r) => (r.data ?? []) as Delta[])
-    ),
-    mark(
-      "deltasWeek",
-      supabase
-        .rpc("wager_deltas", { p_start: weekStart, p_end: nowIso })
-        .then((r) => (r.data ?? []) as Delta[])
-    ),
-    mark(
-      "deltasMonth",
-      supabase
-        .rpc("wager_deltas", { p_start: monthStart, p_end: nowIso })
-        .then((r) => (r.data ?? []) as Delta[])
-    ),
-  ]);
-
-  const sum = (rows: Delta[]) => rows.reduce((a, r) => a + Number(r.delta), 0);
-  const byOwner = (rows: Delta[]) => {
-    const m = new Map<string, number>();
-    for (const r of rows) m.set(r.owner_id, (m.get(r.owner_id) ?? 0) + Number(r.delta));
-    return m;
-  };
-  const byPlayer = (rows: Delta[]) => {
-    const m = new Map<string, number>();
-    for (const r of rows) m.set(r.player_id, Number(r.delta));
-    return m;
-  };
-
-  const dayByOwner = byOwner(dayDeltas);
-  const weekByOwner = byOwner(weekDeltas);
-  const monthByOwner = byOwner(monthDeltas);
-  const monthByPlayer = byPlayer(monthDeltas);
-
-  const allTimeByOwner = new Map<string, number>();
-  const matchedByOwner = new Map<string, number>();
-  let allTimeTotal = 0;
-
-  for (const p of players ?? []) {
-    const w = Number(p.weighted_wager ?? 0);
-    if (w > 0) {
-      allTimeTotal += w;
-      allTimeByOwner.set(p.owner_id, (allTimeByOwner.get(p.owner_id) ?? 0) + w);
-    }
-    if (p.roobet_username?.trim() && w > 0) {
-      matchedByOwner.set(p.owner_id, (matchedByOwner.get(p.owner_id) ?? 0) + 1);
-    }
-  }
-
-  const byRep: WagerByRep[] = (users ?? [])
-    .map((u) => ({
-      userId: u.id,
-      name: u.name,
-      code: u.code,
-      matchedPlayers: matchedByOwner.get(u.id) ?? 0,
-      today: dayByOwner.get(u.id) ?? 0,
-      week: weekByOwner.get(u.id) ?? 0,
-      month: monthByOwner.get(u.id) ?? 0,
-      allTime: allTimeByOwner.get(u.id) ?? 0,
-    }))
-    .sort((a, b) => b.allTime - a.allTime);
-
-  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
-
-  const topPlayers: TopWagerPlayer[] = (players ?? [])
-    .filter((p) => Number(p.weighted_wager ?? 0) > 0)
-    .sort((a, b) => Number(b.weighted_wager) - Number(a.weighted_wager))
-    .slice(0, 15)
-    .map((p) => ({
-      id: p.id,
-      handle: p.handle,
-      reference: p.reference,
-      roobet_username: p.roobet_username,
-      ownerName: names.get(p.owner_id) ?? "—",
-      allTime: Number(p.weighted_wager),
-      month: monthByPlayer.get(p.id) ?? 0,
-    }));
-
-  /* THE LEDGER - company-wide truth, general book included.
-     Latest reading per (username, source) is that pair's all-time total;
-     window figures come from the external deltas RPC. */
-  const claimed = new Set(
-    (players ?? [])
-      .filter((p) => p.roobet_username?.trim())
-      .map((p) => p.roobet_username!.trim().toLowerCase())
-  );
-
-  /* Retired usernames were already wagering before the CRM existed. They stay
-     in every company total but leave the working list, so the handful of
-     genuinely new names are visible instead of buried under hundreds. */
-  const { data: ignoredRows } = await mark(
-    "ignored",
-    supabase.from("wager_ignored").select("username")
-  );
-  const ignored = new Set(
-    (ignoredRows ?? []).map((r) => String(r.username).trim().toLowerCase())
-  );
-
-  type PairInfo = { display: string; source: string; latest: number };
-  const latestByPair = new Map<string, PairInfo>();
-  for (const row of ledgerRows ?? []) {
-    /* One row per pair already - the "keep overwriting until the newest wins"
-       loop that used to be here is now the DISTINCT ON in the function. */
-    const key = `${String(row.username).trim().toLowerCase()}|${row.source}`;
-    latestByPair.set(key, {
-      display: String(row.username),
-      source: row.source,
-      latest: Number(row.wagered),
-    });
-  }
-
-  const codeAgg = new Map<string, CodeTotals>();
-  const codeOf = (source: string) => {
-    let c = codeAgg.get(source);
-    if (!c) {
-      c = { source, today: 0, week: 0, month: 0, allTime: 0, wagerers: 0 };
-      codeAgg.set(source, c);
-    }
-    return c;
-  };
-
-  /* Per code, every pair counts - that is what each code produced.
-     Company-wide, the same player on two codes is the same wagering reported
-     twice, so take their largest reading rather than adding them. */
-  const bestByUsername = new Map<string, number>();
-
-  latestByPair.forEach((info, key) => {
-    const uname = key.slice(0, key.lastIndexOf("|"));
-    bestByUsername.set(uname, Math.max(bestByUsername.get(uname) ?? 0, info.latest));
-
-    const c = codeOf(info.source);
-    c.allTime += info.latest;
-    c.wagerers += 1;
-  });
-
-  let companyAllTime = 0;
-  bestByUsername.forEach((v) => {
-    companyAllTime += v;
-  });
-
-  const sumExt = (rows: ExternalDelta[]) => rows.reduce((a, r) => a + Number(r.delta), 0);
-  for (const r of extDay) codeOf(r.source).today += Number(r.delta);
-  for (const r of extWeek) codeOf(r.source).week += Number(r.delta);
-  for (const r of extMonth) codeOf(r.source).month += Number(r.delta);
-
-  const byCode = Array.from(codeAgg.values()).sort((a, b) => b.allTime - a.allTime);
-
-  // Unclaimed: wagering on your codes, in nobody's book.
-  const monthByUsername = new Map<string, number>();
-  for (const r of extMonth) {
-    monthByUsername.set(
-      r.username,
-      (monthByUsername.get(r.username) ?? 0) + Number(r.delta)
-    );
-  }
-
-  const unclaimedAgg = new Map<string, UnclaimedWagerer & { srcSet: Set<string> }>();
-  latestByPair.forEach((info, key) => {
-    const uname = key.slice(0, key.lastIndexOf("|"));
-    if (claimed.has(uname) || ignored.has(uname)) return;
-    let u = unclaimedAgg.get(uname);
-    if (!u) {
-      u = {
-        username: info.display,
-        sources: "",
-        month: monthByUsername.get(uname) ?? 0,
-        allTime: 0,
-        srcSet: new Set(),
-      };
-      unclaimedAgg.set(uname, u);
-    }
-    u.allTime = Math.max(u.allTime, info.latest);
-    u.srcSet.add(info.source);
-  });
-
-  const allUnclaimed = Array.from(unclaimedAgg.values())
-    .map((u) => ({ ...u, sources: Array.from(u.srcSet).join(", ") }))
-    .sort((a, b) => b.allTime - a.allTime);
-
-  // The total is of everyone unclaimed, not just the filtered view - a search
-  // narrows what you read, it does not change what you are owed.
-  const unclaimedTotal = allUnclaimed.reduce((a, u) => a + u.allTime, 0);
-
-  const needle = search.trim().toLowerCase();
-  const unclaimedList = needle
-    ? allUnclaimed.filter((u) => u.username.toLowerCase().includes(needle))
-    : allUnclaimed;
-
-  // Capped at ten pages: past 500 rows, searching beats paging.
-  const unclaimedPageCount = Math.min(
-    UNCLAIMED_MAX_PAGES,
-    Math.max(1, Math.ceil(unclaimedList.length / UNCLAIMED_PAGE_SIZE))
-  );
-  const safePage = Math.min(Math.max(1, page), unclaimedPageCount);
-
-  /* Deposit signals - wager as proof of deposit.
-     Roobet does not expose deposits, but nobody wagers without one, so a
-     username's first nonzero ledger entry is a dated deposit confirmation. */
-  const firstWagerAt = new Map<string, string>();
-  for (const f of firstWagers ?? []) {
-    // Already the earliest per username - no need to guard against overwriting.
-    firstWagerAt.set(String(f.username).trim().toLowerCase(), f.first_at);
-  }
-
-  // Compared as instants, not strings - Postgres timestamps arrive in a
-  // different ISO flavour than JavaScript produces.
-  const weekMs = new Date(weekStart).getTime();
-  const monthMs = new Date(monthStart).getTime();
-
-  /* THE BASELINE.
-     Without it, "new players" really means "players our sync noticed for the
-     first time" - which, the day after importing history, is everybody. Anyone
-     whose first wager predates the baseline was already playing before we
-     started watching and is never counted as new. */
-  const { data: baselineRow } = await mark(
-    "baseline",
-    supabase
-      .from("settings")
-      .select("value")
-      .eq("key", "wager_new_player_baseline")
-      .maybeSingle()
-  );
-
-  const baseline = String(baselineRow?.value ?? "").trim();
-  const baselineMs = /^\d{4}-\d{2}-\d{2}$/.test(baseline)
-    ? new Date(`${baseline}T00:00:00Z`).getTime()
-    : null;
-
-  const allTimeWagerers = firstWagerAt.size;
-
-  let newSinceBaseline: number | null = null;
-  let newWeek: number | null = null;
-  let newMonth: number | null = null;
-
-  if (baselineMs !== null) {
-    newSinceBaseline = 0;
-    newWeek = 0;
-    newMonth = 0;
-    firstWagerAt.forEach((at) => {
-      const t = new Date(at).getTime();
-      if (t < baselineMs) return;
-      newSinceBaseline! += 1;
-      if (t >= weekMs) newWeek! += 1;
-      if (t >= monthMs) newMonth! += 1;
-    });
-  }
-
-  const toSignal = (p: {
-    id: string;
-    handle: string;
-    reference: string;
-    owner_id: string;
-    status: string;
-    weighted_wager: number | null;
-  }): SignalPlayer => ({
-    id: p.id,
-    handle: p.handle,
-    reference: p.reference,
-    ownerId: p.owner_id,
-    ownerName: names.get(p.owner_id) ?? "—",
-    status: p.status,
-    wager: Number(p.weighted_wager ?? 0),
-  });
-
-  const missedRows = (players ?? [])
-    .filter((p) => Number(p.weighted_wager ?? 0) > 0 && !p.first_deposit_at)
-    .sort((a, b) => Number(b.weighted_wager) - Number(a.weighted_wager));
-
-  const unverifiedRows = (players ?? []).filter(
-    (p) => p.first_deposit_at && Number(p.weighted_wager ?? 0) === 0
-  );
-
-  // Player-based sums are still computed for byRep; the company totals come
-  // from the ledger so the general book counts.
-  void sum;
-  void allTimeTotal;
-
-  return {
-    totals: {
-      today: sumExt(extDay),
-      week: sumExt(extWeek),
-      month: sumExt(extMonth),
-      allTime: companyAllTime,
-    },
-    byCode,
-    unclaimed: {
-      count: allUnclaimed.length,
-      matching: unclaimedList.length,
-      total: unclaimedTotal,
-      page: safePage,
-      pageCount: unclaimedPageCount,
-      sample: unclaimedList.slice(
-        (safePage - 1) * UNCLAIMED_PAGE_SIZE,
-        safePage * UNCLAIMED_PAGE_SIZE
-      ),
-    },
-    byRep,
-    topPlayers,
-    snapshotCount: snapshotCount ?? 0,
-    signals: {
-      allTimeWagerers,
-      newSinceBaseline,
-      newWeek,
-      newMonth,
-      baseline,
-      missed: { count: missedRows.length, sample: missedRows.slice(0, 10).map(toSignal) },
-      unverified: {
-        count: unverifiedRows.length,
-        sample: unverifiedRows.slice(0, 10).map(toSignal),
-      },
-    },
-  };
-}
-
-/* ---------------------------------------------------------- Wager periods */
+   Removed with it: the WagerOverview, CodeTotals, UnclaimedWagerer,
+   TopWagerPlayer and WagerByRep types, which nothing outside this file
+   referenced. */
 
 export type PeriodTotals = {
   total: number;
@@ -1452,4 +992,109 @@ export async function getUnclaimedCount(): Promise<number> {
   const supabase = createClient();
   const { data } = await supabase.rpc("unclaimed_wagerer_count");
   return typeof data === "number" ? data : 0;
+}
+
+/**
+ * DEPOSIT SIGNALS, on their own.
+ *
+ * The Overview page needs exactly this and nothing else, but was calling
+ * getWagerOverview - eleven queries building per-rep totals, per-code
+ * breakdowns, top players and the unclaimed list, of which it rendered none.
+ * That was 660ms of a 666ms page.
+ *
+ * Four queries, because four is what the answer needs.
+ */
+export async function getDepositSignals(timezone: string): Promise<DepositSignals> {
+  const supabase = createClient();
+  const now = new Date();
+
+  const { startOfDayPlusUtc, ymdInZone, dayStartFromYmd } = await import("@/lib/time");
+  const weekStart = startOfDayPlusUtc(timezone, -6, now).toISOString();
+  const monthYmd = `${ymdInZone(now, timezone).slice(0, 7)}-01`;
+  const monthStart = (dayStartFromYmd(monthYmd, timezone) ?? now).toISOString();
+
+  const [{ data: players }, { data: users }, firstWagers, { data: baselineRow }] =
+    await Promise.all([
+      supabase
+        .from("players")
+        .select("id, handle, reference, owner_id, status, weighted_wager, first_deposit_at")
+        .limit(100000),
+      supabase.from("users").select("id, name"),
+      supabase
+        .rpc("wager_first_seen")
+        .then((r) => (r.data ?? []) as { username: string; first_at: string }[]),
+      supabase
+        .from("settings")
+        .select("value")
+        .eq("key", "wager_new_player_baseline")
+        .maybeSingle(),
+    ]);
+
+  const names = new Map((users ?? []).map((u) => [u.id as string, u.name as string]));
+
+  const toSignal = (p: {
+    id: string;
+    handle: string;
+    reference: string;
+    owner_id: string;
+    status: string;
+    weighted_wager: number | null;
+  }): SignalPlayer => ({
+    id: p.id,
+    handle: p.handle,
+    reference: p.reference,
+    ownerId: p.owner_id,
+    ownerName: names.get(p.owner_id) ?? "—",
+    status: p.status,
+    wager: Number(p.weighted_wager ?? 0),
+  });
+
+  const missedRows = (players ?? [])
+    .filter((p) => Number(p.weighted_wager ?? 0) > 0 && !p.first_deposit_at)
+    .sort((a, b) => Number(b.weighted_wager) - Number(a.weighted_wager));
+
+  const unverifiedRows = (players ?? []).filter(
+    (p) => p.first_deposit_at && Number(p.weighted_wager ?? 0) === 0
+  );
+
+  /* THE BASELINE. Without it, "new players" means "players our sync noticed
+     for the first time" - which, the day after importing history, is
+     everybody. */
+  const baseline = String(baselineRow?.value ?? "").trim();
+  const baselineMs = /^\d{4}-\d{2}-\d{2}$/.test(baseline)
+    ? new Date(`${baseline}T00:00:00Z`).getTime()
+    : null;
+
+  const weekMs = new Date(weekStart).getTime();
+  const monthMs = new Date(monthStart).getTime();
+
+  let newSinceBaseline: number | null = null;
+  let newWeek: number | null = null;
+  let newMonth: number | null = null;
+
+  if (baselineMs !== null) {
+    newSinceBaseline = 0;
+    newWeek = 0;
+    newMonth = 0;
+    for (const f of firstWagers) {
+      const t = new Date(f.first_at).getTime();
+      if (t < baselineMs) continue;
+      newSinceBaseline += 1;
+      if (t >= weekMs) newWeek += 1;
+      if (t >= monthMs) newMonth += 1;
+    }
+  }
+
+  return {
+    allTimeWagerers: firstWagers.length,
+    newSinceBaseline,
+    newWeek,
+    newMonth,
+    baseline,
+    missed: { count: missedRows.length, sample: missedRows.slice(0, 10).map(toSignal) },
+    unverified: {
+      count: unverifiedRows.length,
+      sample: unverifiedRows.slice(0, 10).map(toSignal),
+    },
+  };
 }
