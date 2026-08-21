@@ -49,12 +49,19 @@ export type ChurnReport = {
  * average, because a $200-a-week player halving matters as much to that rep as
  * a whale halving matters to the business.
  *
- * Row Level Security scopes wager_deltas, so a rep calling this sees their own
- * players and an admin sees everyone - one function, two audiences.
+ * THE OWNER IS REQUIRED. Pass null for the company-wide view.
+ *
+ * It used to be optional, and the comment here claimed Row Level Security
+ * scoped it. It does not: churn_players is security definer, which bypasses
+ * RLS, and an omitted owner meant EVERYONE. That is the same mistake that put
+ * the company's 244 players on Prime's personal Stats page - a default that
+ * silently widens scope when a caller forgets.
+ *
+ * Now forgetting is a type error, and "everyone" has to be typed out.
  */
 export async function getChurn(
   timezone: string,
-  ownerId?: string,
+  ownerId: string | null,
   limit = 40
 ): Promise<ChurnReport> {
   const supabase = createClient();

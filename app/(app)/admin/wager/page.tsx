@@ -82,7 +82,7 @@ export default async function WagerPage({
         getWagerReport(reportPeriod.period, reportOwner || undefined, 1000),
         timings
       ),
-      timed("churn", getChurn(me.timezone), timings),
+      timed("churn", getChurn(me.timezone, null), timings),
       timed("periods", getWagerPeriods(), timings),
       timed("team", getTeam(), timings),
       timed("repPeriods", getRepPeriods(), timings),

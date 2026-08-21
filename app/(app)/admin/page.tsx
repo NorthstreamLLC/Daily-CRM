@@ -89,7 +89,7 @@ export default async function AdminOverview({
   const [rows, audit, churn, wagerOverview] = await Promise.all([
     timed("leaderboard", getLeaderboard(me, range), timings),
     timed("audit", getRecentAudit(8), timings),
-    timed("churn", getChurn(me.timezone), timings),
+    timed("churn", getChurn(me.timezone, null), timings),
     /* This page pulls the wager overview too, for the deposit signals. When
        that function was fetching the whole ledger it made Overview as slow as
        Wager - one bad query, two slow pages. */

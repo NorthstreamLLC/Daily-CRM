@@ -25,7 +25,7 @@ const CATEGORY_HINT: Record<string, string> = {
 export default async function SettingsPage() {
   const [settings, stages, sources, wagerSources] = await Promise.all([
     getAllSettings(),
-    getFunnelStages(),
+    getFunnelStages(null) /* company-wide: this is the pipeline settings page */,
     getSourcesAdmin(),
     getWagerSources(),
   ]);

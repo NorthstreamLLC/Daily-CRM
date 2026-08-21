@@ -142,7 +142,9 @@ export type FunnelStage = {
  *
  * Pass undefined only where the whole company is genuinely meant.
  */
-export async function getFunnelStages(ownerId?: string): Promise<FunnelStage[]> {
+export async function getFunnelStages(
+  ownerId: string | null
+): Promise<FunnelStage[]> {
   const supabase = createClient();
 
   const [{ data: stages }, { data: players }] = await Promise.all([
@@ -1161,11 +1163,6 @@ export async function getPeriodPlayers(
 /**
  * PER-PLAYER WAGER FOR A DATE WINDOW.
  *
- * The report behind weekly and monthly reviews: who produced what, between two
- * dates. Row Level Security scopes it automatically - a rep calling this sees
- * their own players, an admin sees everyone - so the same function serves both
- * the Stats page and the Admin wager tab.
- */
 /**
  * THE REPORT - now covering everyone.
  *
