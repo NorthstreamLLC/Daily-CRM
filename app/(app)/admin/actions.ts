@@ -1011,64 +1011,75 @@ export async function runImport(
      that already existed and the insert would fail on the unique constraint. */
   await supabase.rpc("sync_reference_counter", { p_user: targetUserId });
 
-  // Inserted in chunks. One 20,000-row statement is a single point of failure;
-  // 500 at a time means a problem costs one chunk, not the whole file.
+  /* INSERT, AND DO NOT LET ONE BAD ROW COST THE FILE.
+
+     Three things can go wrong, in increasing order of annoyance:
+
+       1. a reference from the sheet is already taken
+       2. a reference the TRIGGER generated is already taken
+       3. some single row is bad for a reason we have not met yet
+
+     For (1) the chunk is retried without the sheet's references - keeping the
+     old Player IDs is a courtesy, and losing three hundred players to it is
+     not a trade worth making.
+
+     For (2) and (3) the chunk is split in half and each half retried, down to
+     single rows. A bad row then costs itself and gets named, instead of
+     silently taking three hundred and nineteen good ones with it. */
   let imported = 0;
   let renumbered = 0;
 
-  for (let i = 0; i < toInsert.length; i += 500) {
-    const chunk = toInsert.slice(i, i + 500);
+  async function insertBatch(
+    batch: Record<string, unknown>[],
+    firstRow: number,
+    strippedRefs: boolean
+  ): Promise<void> {
+    if (batch.length === 0) return;
+
     const { error, count } = await supabase
       .from("players")
-      .insert(chunk, { count: "exact" });
+      .insert(batch, { count: "exact" });
 
     if (!error) {
-      imported += count ?? chunk.length;
-      continue;
+      imported += count ?? batch.length;
+      if (strippedRefs) renumbered += batch.length;
+      return;
     }
 
-    /* A REFERENCE CLASH IS NOT WORTH LOSING THE IMPORT OVER.
-
-       Keeping the sheet's Player IDs is a courtesy - it means MH-0042 still
-       finds the same person. If one of them is already taken, the right
-       answer is a different number, not sixty-five lost players.
-
-       Seb's book failed exactly this way: "Rows 2-66 failed: duplicate key
-       value violates unique constraint players_reference_key", and nothing
-       imported. So the chunk is retried without the supplied references and
-       the trigger assigns fresh ones. */
     const clash = /players_reference_key|duplicate key/i.test(error.message);
 
-    if (clash) {
-      const stripped = chunk.map((row) => {
+    // First response to a reference clash: give up the sheet's numbers.
+    if (clash && !strippedRefs) {
+      const stripped = batch.map((row) => {
         const copy = { ...row };
         delete copy.reference;
         return copy;
       });
-
-      const retry = await supabase
-        .from("players")
-        .insert(stripped, { count: "exact" });
-
-      if (!retry.error) {
-        imported += retry.count ?? stripped.length;
-        renumbered += stripped.length;
-        continue;
-      }
-
-      rejections.push({
-        row: i + 2,
-        reason:
-          `Rows ${i + 2}-${i + chunk.length + 1} failed even after renumbering: ` +
-          retry.error.message,
-      });
-      continue;
+      return insertBatch(stripped, firstRow, true);
     }
 
-    rejections.push({
-      row: i + 2,
-      reason: `Rows ${i + 2}-${i + chunk.length + 1} failed: ${error.message}`,
-    });
+    // One row left and still failing - name it and move on.
+    if (batch.length === 1) {
+      rejections.push({
+        row: firstRow,
+        reason: error.message,
+        handle: String(batch[0].handle ?? ""),
+      });
+      return;
+    }
+
+    const middle = Math.floor(batch.length / 2);
+    await insertBatch(batch.slice(0, middle), firstRow, strippedRefs);
+    await insertBatch(batch.slice(middle), firstRow + middle, strippedRefs);
+  }
+
+  /* The counter must be right BEFORE the trigger issues anything. It used to
+     run only at the end - and since a supplied reference skips the trigger
+     entirely, the trigger is what increments it, so it never advanced. */
+  await supabase.rpc("sync_reference_counter", { p_user: targetUserId });
+
+  for (let i = 0; i < toInsert.length; i += 500) {
+    await insertBatch(toInsert.slice(i, i + 500), i + 2, false);
   }
 
   if (renumbered > 0) {
