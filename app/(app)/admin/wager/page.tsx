@@ -267,7 +267,13 @@ export default async function WagerPage({
                 }
               />
             ) : (
-              <WagererTable rows={report.rows} periodLabel={reportPeriod.label} />
+              <WagererTable
+                rows={report.rows}
+                periodLabel={reportPeriod.label}
+                /* The true count, not the number of rows loaded - so the table
+                   can say "100 of 841" and mean it. */
+                totalWagerers={report.wagererCount}
+              />
             )}
           </section>
 

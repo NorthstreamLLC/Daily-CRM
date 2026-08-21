@@ -24,13 +24,13 @@ export function WagererTable({
   rows,
   periodLabel,
   perPage = 100,
-  loadedLimit = 2000,
+  totalWagerers,
 }: {
   rows: ReportRow[];
   periodLabel: string;
   perPage?: number;
-  /** How many the page asked for. Hitting it exactly means there may be more. */
-  loadedLimit?: number;
+  /** Everyone who wagered, counted in the database - may exceed rows.length. */
+  totalWagerers?: number;
 }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -205,9 +205,11 @@ export function WagererTable({
                 {searching && " matching"}
               </p>
               <div className="flex items-center gap-1">
-                {rows.length >= loadedLimit && (
+                {/* Say so when the table is holding fewer than exist. */}
+                {typeof totalWagerers === "number" && totalWagerers > rows.length && (
                   <span className="mr-2 text-caption text-warning">
-                    first {loadedLimit.toLocaleString()} only — export for the rest
+                    {rows.length.toLocaleString()} of{" "}
+                    {totalWagerers.toLocaleString()} loaded — export for all
                   </span>
                 )}
                 <PageButton

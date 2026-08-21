@@ -1242,11 +1242,24 @@ export async function getWagerReport(
           ? { p_type: "week", p_from: period.start, p_to: null }
           : { p_type: "month", p_from: period.from, p_to: period.to };
 
-  const { data } = await supabase.rpc("wager_report_rows", {
-    ...args,
-    p_owner: ownerId ?? null,
-    p_limit: limit,
-  });
+  /* Rows and totals asked for separately, on purpose.
+
+     The totals used to be `rows.reduce(...)` over whatever the limit returned,
+     so "500 wagerers" meant "the limit is 500" and the money figures were the
+     top 500 only - disagreeing with the headline cards on the same page, which
+     are a real aggregate. A total is a property of the data, not of the page
+     size. */
+  const [{ data }, { data: totalsData }] = await Promise.all([
+    supabase.rpc("wager_report_rows", {
+      ...args,
+      p_owner: ownerId ?? null,
+      p_limit: limit,
+    }),
+    supabase.rpc("wager_report_totals", {
+      ...args,
+      p_owner: ownerId ?? null,
+    }),
+  ]);
 
   const raw = (data ?? []) as {
     username: string;
@@ -1274,12 +1287,24 @@ export async function getWagerReport(
     allTime: Number(r.all_time),
   }));
 
+  /* Fall back to the old row-derived figures only if the totals function is
+     missing - i.e. migration 029 has not been run yet. Wrong-but-close beats
+     a blank page, and the row count reveals it: if it exactly equals the
+     limit, it is the limit you are reading. */
+  const t = (totalsData ?? [])[0] as
+    | { total: number; claimed: number; unclaimed: number; wagerers: number }
+    | undefined;
+
   return {
     rows,
-    total: rows.reduce((a, r) => a + r.wagered, 0),
-    claimedTotal: rows.filter((r) => r.ownerId).reduce((a, r) => a + r.wagered, 0),
-    unclaimedTotal: rows.filter((r) => !r.ownerId).reduce((a, r) => a + r.wagered, 0),
-    wagererCount: rows.length,
+    total: t ? Number(t.total) : rows.reduce((a, r) => a + r.wagered, 0),
+    claimedTotal: t
+      ? Number(t.claimed)
+      : rows.filter((r) => r.ownerId).reduce((a, r) => a + r.wagered, 0),
+    unclaimedTotal: t
+      ? Number(t.unclaimed)
+      : rows.filter((r) => !r.ownerId).reduce((a, r) => a + r.wagered, 0),
+    wagererCount: t ? Number(t.wagerers) : rows.length,
   };
 }
 
