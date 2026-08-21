@@ -862,16 +862,23 @@ export async function getWagerPeriods(): Promise<WagerPeriods> {
      60 days is what migration 024 keeps (75, with room to spare). 26 weeks and
      24 months are simply more than anyone reads on one screen. */
   type HistRow = { period_start: string; total: number; wagerers: number };
-  const histFor = (type: HistoryGrain, limit: number) =>
-    supabase
-      .rpc("wager_period_history", { p_type: type, p_limit: limit })
-      .then((r) => (r.data ?? []) as HistRow[]);
 
-  const [dayHist, weekHist, monthHist] = await Promise.all([
-    histFor("day", 60),
-    histFor("week", 26),
-    histFor("month", 24),
-  ]);
+  /* One call for all three grains. It was three, each scanning the same table
+     for the same rows and differing only in which period_type they wanted -
+     three round trips and three scans to answer one question. */
+  const { data: histAll } = await supabase.rpc("wager_all_history", {
+    p_days: 60,
+    p_weeks: 26,
+    p_months: 24,
+  });
+
+  const grouped = { day: [] as HistRow[], week: [] as HistRow[], month: [] as HistRow[] };
+  for (const r of (histAll ?? []) as (HistRow & { grain: HistoryGrain })[]) {
+    grouped[r.grain]?.push(r);
+  }
+  const dayHist = grouped.day;
+  const weekHist = grouped.week;
+  const monthHist = grouped.month;
 
   const fold = (rows: Row[]): PeriodTotals => ({
     total: rows.reduce((a, r) => a + Number(r.total), 0),
@@ -914,10 +921,10 @@ export async function getWagerPeriods(): Promise<WagerPeriods> {
     };
   };
 
-  /* Oldest first, because a chart reads left to right. The query returns
-     newest first so that the limit takes the most RECENT n, not the first n. */
+  /* Already oldest-first: wager_all_history picks the most recent n with a
+     window function, then orders ascending, so no reversing here. */
   const series = (rows: HistRow[], grain: HistoryGrain) =>
-    rows.map(point(grain)).reverse();
+    rows.map(point(grain));
 
   return {
     all: fold(allRows),
