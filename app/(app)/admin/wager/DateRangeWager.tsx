@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button, Input, Notice, cn } from "@/components/ui";
+import { X as XIcon } from "@/components/icons";
 
 const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -104,13 +105,29 @@ export function DateRangeWager() {
       </div>
 
       {result?.error && (
-        <div className="p-4">
-          <Notice tone="danger">{result.error}</Notice>
+        <div className="flex items-start gap-2 p-4">
+          <div className="flex-1">
+            <Notice tone="danger">{result.error}</Notice>
+          </div>
+          <DismissButton onClick={() => setResult(null)} />
         </div>
       )}
 
       {result && !result.error && (
         <>
+          {/* A one-off answer needs a way to put it away.
+
+              This result is not part of the page - it is something you asked
+              for once. Leaving it stuck below the form with no dismiss meant
+              the answer to a question from ten minutes ago sat under the next
+              one you typed, and the page never returned to its resting state. */}
+          <div className="flex items-center justify-between gap-2 border-b border-line-strong px-4 pt-3">
+            <p className="text-small font-medium text-ink-muted">
+              Result for {result.from} to {result.to}
+            </p>
+            <DismissButton onClick={() => setResult(null)} label="Clear result" />
+          </div>
+
           <div className="grid gap-3 border-b border-line-strong p-4 sm:grid-cols-3">
             <Figure label={`${result.from} to ${result.to}`} value={money(result.total)} emphasis />
             <Figure label="In a rep's book" value={money(result.claimed)} />
@@ -248,5 +265,34 @@ function Th({
     >
       {children}
     </th>
+  );
+}
+
+/**
+ * Put an answer away.
+ *
+ * Small, quiet, and always in the same corner - this is a control for undoing
+ * something you did on purpose, not an action worth drawing attention to.
+ */
+function DismissButton({
+  onClick,
+  label = "Dismiss",
+}: {
+  onClick: () => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2
+                 text-caption font-medium text-ink-subtle transition-colors
+                 duration-fast hover:bg-sunken hover:text-ink"
+    >
+      <XIcon size={12} />
+      {label}
+    </button>
   );
 }

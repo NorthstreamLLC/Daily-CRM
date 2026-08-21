@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReportRow } from "@/lib/admin";
 import { cn } from "@/components/ui";
-import { Search, X } from "@/components/icons";
+import { ChevronLeft, ChevronRight, Search, X } from "@/components/icons";
 
 const money = (n: number) =>
   "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -23,13 +23,17 @@ const money = (n: number) =>
 export function WagererTable({
   rows,
   periodLabel,
-  shown = 100,
+  perPage = 100,
+  loadedLimit = 2000,
 }: {
   rows: ReportRow[];
   periodLabel: string;
-  shown?: number;
+  perPage?: number;
+  /** How many the page asked for. Hitting it exactly means there may be more. */
+  loadedLimit?: number;
 }) {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -44,7 +48,23 @@ export function WagererTable({
   }, [rows, query]);
 
   const searching = query.trim().length > 0;
-  const visible = searching ? filtered : filtered.slice(0, shown);
+
+  /* Paged rather than cut off at 100.
+
+     "Showing the top 100 of 415" is a dead end: the other 315 exist, they are
+     already loaded in the browser, and the only way to see one was to export
+     a CSV and open it elsewhere. */
+  const pageCount = Math.max(1, Math.ceil(filtered.length / perPage));
+  const current = Math.min(page, pageCount);
+  const start = (current - 1) * perPage;
+  const visible = filtered.slice(start, start + perPage);
+
+  /* Typing a search while on page 4 would otherwise show page 4 of the
+     results - usually empty, and reading as "no matches". */
+  function search(next: string) {
+    setQuery(next);
+    setPage(1);
+  }
 
   return (
     <div>
@@ -56,7 +76,7 @@ export function WagererTable({
           />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => search(e.target.value)}
             placeholder="Search username, player, rep or reference"
             aria-label="Search wagerers"
             className="h-9 w-full rounded-control border border-line-strong bg-surface pl-8 pr-8
@@ -64,13 +84,13 @@ export function WagererTable({
                        focus:border-accent"
             onKeyDown={(e) => {
               // Escape clears - the fastest way out of a filtered list.
-              if (e.key === "Escape") setQuery("");
+              if (e.key === "Escape") search("");
             }}
           />
           {searching && (
             <button
               type="button"
-              onClick={() => setQuery("")}
+              onClick={() => search("")}
               aria-label="Clear search"
               className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center
                          justify-center rounded-full text-ink-subtle hover:bg-sunken hover:text-ink"
@@ -83,7 +103,7 @@ export function WagererTable({
         {searching && (
           <button
             type="button"
-            onClick={() => setQuery("")}
+            onClick={() => search("")}
             className="inline-flex h-9 items-center gap-1.5 rounded-control border
                        border-line-strong px-3 text-small font-medium text-ink-muted
                        hover:bg-sunken hover:text-ink"
@@ -100,7 +120,7 @@ export function WagererTable({
           Nothing matches &ldquo;{query}&rdquo;.{" "}
           <button
             type="button"
-            onClick={() => setQuery("")}
+            onClick={() => search("")}
             className="font-medium text-accent underline-offset-2 hover:underline"
           >
             Clear the search
@@ -130,7 +150,7 @@ export function WagererTable({
                   )}
                 >
                   <td className="tabular px-4 py-2 text-caption text-ink-subtle">
-                    {i + 1}
+                    {start + i + 1}
                   </td>
                   <td className="px-4 py-2 text-body font-medium text-ink">
                     {r.playerId ? (
@@ -176,11 +196,39 @@ export function WagererTable({
             </tbody>
           </table>
 
-          {!searching && filtered.length > shown && (
-            <p className="border-t border-line-strong px-4 py-2.5 text-small text-ink-muted">
-              Showing the top {shown} of {filtered.length.toLocaleString()}. Search to
-              find one, or export the CSV for every row.
-            </p>
+          {pageCount > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-strong px-4 py-2.5">
+              <p className="tabular text-small text-ink-muted">
+                {(start + 1).toLocaleString()}–
+                {Math.min(start + perPage, filtered.length).toLocaleString()} of{" "}
+                {filtered.length.toLocaleString()}
+                {searching && " matching"}
+              </p>
+              <div className="flex items-center gap-1">
+                {rows.length >= loadedLimit && (
+                  <span className="mr-2 text-caption text-warning">
+                    first {loadedLimit.toLocaleString()} only — export for the rest
+                  </span>
+                )}
+                <PageButton
+                  onClick={() => setPage(current - 1)}
+                  disabled={current <= 1}
+                  label="Previous page"
+                >
+                  <ChevronLeft size={14} />
+                </PageButton>
+                <span className="tabular px-2 text-small text-ink-muted">
+                  Page {current} of {pageCount}
+                </span>
+                <PageButton
+                  onClick={() => setPage(current + 1)}
+                  disabled={current >= pageCount}
+                  label="Next page"
+                >
+                  <ChevronRight size={14} />
+                </PageButton>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -207,5 +255,35 @@ function Th({
     >
       {children}
     </th>
+  );
+}
+
+function PageButton({
+  children,
+  onClick,
+  disabled,
+  label,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className={cn(
+        "inline-flex h-7 w-7 items-center justify-center rounded-control border",
+        "border-line-strong transition-colors duration-fast",
+        disabled
+          ? "text-ink-subtle opacity-40"
+          : "text-ink-muted hover:bg-sunken hover:text-ink"
+      )}
+    >
+      {children}
+    </button>
   );
 }

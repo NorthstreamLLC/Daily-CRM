@@ -61,7 +61,10 @@ export default async function WagerPage({
   const [overview, report, churn, periods, team, repPeriods] =
     await Promise.all([
       getWagerOverview(me.timezone, "", 1),
-      getWagerReport(reportPeriod.period, reportOwner || undefined, 500),
+      /* 2,000 rather than 500. The table pages client-side now, so the limit
+         is no longer "how many to show" but "how many exist at all" - and a
+         501st wagerer would simply have been unreachable. */
+      getWagerReport(reportPeriod.period, reportOwner || undefined, 2000),
       getChurn(me.timezone),
       getWagerPeriods(),
       getTeam(),
