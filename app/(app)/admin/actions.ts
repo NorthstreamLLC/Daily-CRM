@@ -916,7 +916,20 @@ export async function runImport(
 
   if (batchError || !batch) return { error: batchError?.message ?? "Could not start the import." };
 
-  const rejections: { row: number; reason: string; handle?: string }[] = [];
+  /* Two different things end up in this list and they are NOT the same:
+
+       skipped  - the row did not become a player
+       imported - the row DID become a player, with something worth knowing
+
+     They were reported together under "why N rows were skipped", so a book
+     full of #REF! dates looked like a book that had failed to import. It had
+     imported fine; the dates were just empty. */
+  const rejections: {
+    row: number;
+    reason: string;
+    handle?: string;
+    kind?: "skipped" | "imported";
+  }[] = [];
   const toInsert: Record<string, unknown>[] = [];
   const seen = new Set<string>();
 
@@ -935,17 +948,17 @@ export async function runImport(
 
     const handle = get("handle");
     if (!handle) {
-      rejections.push({ row: rowNumber, reason: "No player handle" });
+      rejections.push({ row: rowNumber, reason: "No player handle", kind: "skipped" });
       return;
     }
 
     const key = handle.toLowerCase();
     if (seen.has(key)) {
-      rejections.push({ row: rowNumber, reason: "Duplicate within the file", handle });
+      rejections.push({ row: rowNumber, reason: "Duplicate within the file", handle, kind: "skipped" });
       return;
     }
     if (alreadyThere.has(key)) {
-      rejections.push({ row: rowNumber, reason: "Already in this book", handle });
+      rejections.push({ row: rowNumber, reason: "Already in this book", handle, kind: "skipped" });
       return;
     }
     seen.add(key);
@@ -963,12 +976,24 @@ export async function runImport(
         ? Math.min(Math.floor(attemptsRaw), 99)
         : 0;
 
-    if (assigned.error) rejections.push({ row: rowNumber, reason: assigned.error, handle });
+    if (assigned.error) {
+      rejections.push({ row: rowNumber, reason: assigned.error, handle, kind: "imported" });
+    }
     if (lastContact.error) {
-      rejections.push({ row: rowNumber, reason: lastContact.error, handle });
+      rejections.push({
+        row: rowNumber,
+        reason: `${lastContact.error} Imported with no last-contact date, so they will show as never contacted.`,
+        handle,
+        kind: "imported",
+      });
     }
     if (firstDeposit.error) {
-      rejections.push({ row: rowNumber, reason: firstDeposit.error, handle });
+      rejections.push({
+        row: rowNumber,
+        reason: `${firstDeposit.error} Imported without a first-deposit date.`,
+        handle,
+        kind: "imported",
+      });
     }
 
     /* KEEP THE PLAYER ID FROM THE SHEET where it is safe to.
@@ -1085,6 +1110,7 @@ export async function runImport(
   if (renumbered > 0) {
     rejections.push({
       row: 0,
+      kind: "imported",
       reason:
         `${renumbered} player${renumbered === 1 ? "" : "s"} were given new ` +
         `reference numbers - the IDs in the sheet were already in use. ` +

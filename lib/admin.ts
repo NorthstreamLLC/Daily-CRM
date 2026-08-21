@@ -274,7 +274,15 @@ export type ImportBatch = {
   rows_total: number;
   rows_imported: number;
   rows_rejected: number;
-  rejections: { row: number; reason: string; handle?: string }[];
+  /* "skipped" did not become a player; "imported" did, with a caveat. Older
+     batches have no kind - treat those as skipped, which is what the report
+     used to call them. */
+  rejections: {
+    row: number;
+    reason: string;
+    handle?: string;
+    kind?: "skipped" | "imported";
+  }[];
   created_at: string;
   target_user_id: string | null;
   targetName: string;
@@ -1095,4 +1103,86 @@ export async function getDepositSignals(timezone: string): Promise<DepositSignal
       sample: unverifiedRows.slice(0, 10).map(toSignal),
     },
   };
+}
+
+/* ------------------------------------------------------------- Duplicates */
+
+export type DuplicateRow = {
+  kind: "roobet" | "handle";
+  value: string;
+  playerId: string;
+  reference: string | null;
+  handle: string;
+  roobetUsername: string | null;
+  ownerName: string;
+  status: string;
+  wagered: number;
+  lastContactAt: string | null;
+};
+
+export type DuplicateGroup = {
+  kind: "roobet" | "handle";
+  value: string;
+  players: DuplicateRow[];
+};
+
+/**
+ * THE SAME PERSON IN TWO BOOKS.
+ *
+ * Thirteen spreadsheets maintained separately for a year will contain the same
+ * people more than once. The import reports it and carries on - a duplicate is
+ * a decision about who owns a player, and that is a human's call. This is
+ * where the decision can happen.
+ *
+ * Grouped, because a duplicate is only meaningful as a pair: one row saying
+ * "this is a duplicate" tells you nothing about what it duplicates.
+ */
+export async function getDuplicates(): Promise<DuplicateGroup[]> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("duplicate_players");
+
+  type Raw = {
+    kind: "roobet" | "handle";
+    value: string;
+    player_id: string;
+    reference: string | null;
+    handle: string;
+    roobet_username: string | null;
+    owner_name: string;
+    status: string;
+    wagered: number;
+    last_contact_at: string | null;
+  };
+
+  const groups = new Map<string, DuplicateGroup>();
+
+  for (const r of (data ?? []) as Raw[]) {
+    const key = `${r.kind}|${r.value}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { kind: r.kind, value: r.value, players: [] };
+      groups.set(key, group);
+    }
+    group.players.push({
+      kind: r.kind,
+      value: r.value,
+      playerId: r.player_id,
+      reference: r.reference,
+      handle: r.handle,
+      roobetUsername: r.roobet_username,
+      ownerName: r.owner_name,
+      status: r.status,
+      wagered: Number(r.wagered),
+      lastContactAt: r.last_contact_at,
+    });
+  }
+
+  /* Roobet duplicates first - money is attributed arbitrarily between them,
+     so they cost something. A shared handle is only awkward. */
+  return Array.from(groups.values()).sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "roobet" ? -1 : 1;
+    const aMax = Math.max(...a.players.map((p) => p.wagered));
+    const bMax = Math.max(...b.players.map((p) => p.wagered));
+    return bMax - aMax;
+  });
 }

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Badge, Card, EmptyState, Notice, SectionHeader, cn } from "@/components/ui";
 import { AlertTriangle, Check, ChevronRight, History, TrendingUp, UserCheck, Users, Wallet } from "@/components/icons";
 import { getMe } from "@/lib/queries";
-import { getDepositSignals, getRecentAudit } from "@/lib/admin";
+import { getDepositSignals, getDuplicates, getRecentAudit } from "@/lib/admin";
 import { getChurn } from "@/lib/churn";
 import { ChurnList } from "../ChurnList";
 import { getLeaderboard, resolveRange } from "@/lib/stats";
@@ -86,7 +86,7 @@ export default async function AdminOverview({
   const startedAt = Date.now();
   const timings: { name: string; ms: number }[] = [];
 
-  const [rows, audit, churn, signals] = await Promise.all([
+  const [rows, audit, churn, signals, duplicates] = await Promise.all([
     timed("leaderboard", getLeaderboard(me, range), timings),
     timed("audit", getRecentAudit(8), timings),
     timed("churn", getChurn(me.timezone, null), timings),
@@ -94,6 +94,7 @@ export default async function AdminOverview({
        queries producing per-rep totals, top players and per-code breakdowns
        that this page does not render - and it was 660ms of a 666ms page. */
     timed("signals", getDepositSignals(me.timezone), timings),
+    timed("duplicates", getDuplicates(), timings),
   ]);
 
   const totals = rows.reduce(
@@ -515,6 +516,70 @@ export default async function AdminOverview({
       </section>
 
 
+
+      {/* THE SAME PERSON IN TWO BOOKS.
+
+          Only rendered when there are any, because an empty "Duplicates"
+          heading on every page load trains you to scroll past it - and then
+          you scroll past it on the day it is not empty. */}
+      {duplicates.length > 0 && (
+        <section className="mb-8">
+          <SectionHeader
+            title="In more than one book"
+            count={duplicates.length}
+            hint="The same person appears twice. Where they share a Roobet username the wager is credited to whichever record was touched last, which is arbitrary — decide who owns them and delete the other."
+          />
+
+          <div className="space-y-2">
+            {duplicates.slice(0, 25).map((group) => (
+              <Card key={`${group.kind}-${group.value}`} padded={false}>
+                <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+                  <Badge tone={group.kind === "roobet" ? "danger" : "neutral"}>
+                    {group.kind === "roobet" ? "Same Roobet username" : "Same handle"}
+                  </Badge>
+                  <span className="font-medium text-ink">{group.value}</span>
+                  <span className="tabular text-caption text-ink-subtle">
+                    {group.players.length} records
+                  </span>
+                </div>
+
+                <ul>
+                  {group.players.map((p) => (
+                    <li
+                      key={p.playerId}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b
+                                 border-line px-4 py-2 last:border-0"
+                    >
+                      <Link
+                        href={`/book?player=${p.playerId}`}
+                        className="font-medium text-accent underline-offset-2 hover:underline"
+                      >
+                        {p.handle}
+                      </Link>
+                      <span className="tabular text-caption text-ink-subtle">
+                        {p.reference}
+                      </span>
+                      <span className="text-small text-ink-muted">{p.ownerName}</span>
+                      <span className="text-small text-ink-subtle">{p.status}</span>
+                      {p.wagered > 0 && (
+                        <span className="tabular ml-auto text-small font-semibold text-ink">
+                          {money(p.wagered)}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            ))}
+          </div>
+
+          {duplicates.length > 25 && (
+            <p className="mt-2 text-small text-ink-muted">
+              Showing 25 of {duplicates.length.toLocaleString()}.
+            </p>
+          )}
+        </section>
+      )}
 
       <section>
         <SectionHeader

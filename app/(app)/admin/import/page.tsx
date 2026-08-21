@@ -1,7 +1,7 @@
 import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
-import { History, Inbox } from "@/components/icons";
+import { AlertTriangle, History, Inbox } from "@/components/icons";
 import { getMe } from "@/lib/queries";
-import { getImportHistory, getTeam } from "@/lib/admin";
+import { getImportHistory, getTeam, type ImportBatch } from "@/lib/admin";
 import { formatDateTime } from "@/lib/time";
 import { ImportForm } from "./ImportForm";
 import { UndoImport } from "./UndoImport";
@@ -134,34 +134,86 @@ export default async function ImportPage() {
                   )}
                 </div>
 
-                {batch.rejections.length > 0 && (
-                  <details className="mt-3">
-                    <summary
-                      className="cursor-pointer text-small font-medium text-accent
-                                 underline-offset-2 hover:underline"
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <History size={13} />
-                        See why {batch.rejections.length.toLocaleString()} rows were
-                        skipped
-                      </span>
-                    </summary>
-                    <ul
-                      className={cn(
-                        "mt-2 max-h-56 space-y-1 overflow-y-auto rounded-control",
-                        "border border-line bg-sunken/50 p-3"
-                      )}
-                    >
-                      {batch.rejections.map((r, i) => (
-                        <li key={i} className="text-caption text-ink-muted">
-                          <span className="tabular font-medium text-ink">Row {r.row}</span>
-                          {r.handle && <span className="text-ink"> · {r.handle}</span>} —{" "}
-                          {r.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
+                {batch.rejections.length > 0 &&
+                  (() => {
+                    /* Two lists, not one.
+
+                       A row with an unreadable date IS imported - the date is
+                       just left empty. Listing it under "why N rows were
+                       skipped" made a book that imported perfectly look like a
+                       book that had failed, which is how this was reported:
+                       "But these didn't go in bc of the date?? wtf".
+
+                       Older batches carry no kind. They are treated as
+                       skipped, which is what the report called them at the
+                       time. */
+                    const skipped = batch.rejections.filter(
+                      (r) => (r.kind ?? "skipped") === "skipped"
+                    );
+                    const noted = batch.rejections.filter((r) => r.kind === "imported");
+
+                    const list = (
+                      rows: ImportBatch["rejections"],
+                      tone: "skipped" | "imported"
+                    ) => (
+                      <ul
+                        className={cn(
+                          "mt-2 max-h-56 space-y-1 overflow-y-auto rounded-control p-3",
+                          tone === "skipped"
+                            ? "border border-line bg-sunken/50"
+                            : "border border-warning/25 bg-warning-soft/40"
+                        )}
+                      >
+                        {rows.map((r, i) => (
+                          <li key={i} className="text-caption text-ink-muted">
+                            {r.row > 0 && (
+                              <span className="tabular font-medium text-ink">
+                                Row {r.row}
+                              </span>
+                            )}
+                            {r.handle && <span className="text-ink"> · {r.handle}</span>}
+                            {r.row > 0 ? " — " : ""}
+                            {r.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    );
+
+                    return (
+                      <div className="mt-3 space-y-2">
+                        {skipped.length > 0 && (
+                          <details>
+                            <summary
+                              className="cursor-pointer text-small font-medium text-accent
+                                         underline-offset-2 hover:underline"
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <History size={13} />
+                                {skipped.length.toLocaleString()} rows were skipped
+                              </span>
+                            </summary>
+                            {list(skipped, "skipped")}
+                          </details>
+                        )}
+
+                        {noted.length > 0 && (
+                          <details>
+                            <summary
+                              className="cursor-pointer text-small font-medium text-warning
+                                         underline-offset-2 hover:underline"
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <AlertTriangle size={13} />
+                                {noted.length.toLocaleString()} imported, with something
+                                worth knowing
+                              </span>
+                            </summary>
+                            {list(noted, "imported")}
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })()}
               </Card>
             ))}
           </div>
