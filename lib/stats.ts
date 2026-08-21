@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { onlyDue, requireRoobetInQueue, type Me } from "@/lib/queries";
+import { requireRoobetInQueue, type Me } from "@/lib/queries";
 import { startOfDayPlusUtc, startOfDayUtc, ymdInZone } from "@/lib/time";
 import { prettyDate, type DateRange } from "@/lib/ranges";
 
@@ -389,7 +389,7 @@ export async function getLeaderboard(
 
   const nowIso = new Date().toISOString();
 
-  const [{ data: users }, periodEvents, allVipEvents, book, dueRows] = await Promise.all([
+  const [{ data: users }, periodEvents, allVipEvents, book, outstanding] = await Promise.all([
     supabase
       .from("users")
       .select("id, name, code, role, timezone")
@@ -427,22 +427,18 @@ export async function getLeaderboard(
       return (data ?? []) as { owner_id: string; players: number }[];
     })(),
 
-    /* Only the players who could possibly be due - far smaller than the book.
+    /* How many are waiting on each rep, COUNTED IN THE DATABASE.
 
-       Uses onlyDue so this agrees with what each rep actually sees on their
-       Today page. It used to spell the rule out again here, and the two
-       drifted: after Moneyheist's import his own queue said 8 while this
-       column said 224 about him, on the same day, because this copy still
-       counted dead leads with no Roobet username. */
+       This used to fetch every due player in the company and count them in
+       JavaScript. At seven books that is ~1,150 rows, PostgREST caps the
+       response, and the rows past the cap vanished silently - so Tuna showed
+       "Clear" with 176 people waiting. A count that can be quietly truncated
+       is worse than no count, because this is the number managers act on. */
     (async () => {
-      const { data } = await onlyDue(
-        supabase
-          .from("players_enriched")
-          .select("owner_id, last_contact_at, next_followup_at, missing_roobet"),
-        nowIso,
-        await requireRoobetInQueue()
-      ).limit(200000);
-      return data ?? [];
+      const { data } = await supabase.rpc("outstanding_by_owner", {
+        p_require_roobet: await requireRoobetInQueue(),
+      });
+      return (data ?? []) as { owner_id: string; outstanding: number }[];
     })(),
   ]);
 
@@ -484,26 +480,12 @@ export async function getLeaderboard(
     }
   }
 
-  // "Not yet worked today" depends on where the rep is, so each person's own
-  // day boundary decides it - the same rule their queue uses.
-  const dayStart = new Map<string, number>();
-  for (const r of rows) dayStart.set(r.userId, startOfDayUtc(r.timezone).getTime());
-
-  for (const p of dueRows as {
-    owner_id: string;
-    last_contact_at: string | null;
-    next_followup_at: string | null;
-    missing_roobet: boolean;
-  }[]) {
-    const row = index.get(p.owner_id);
-    if (!row) continue;
-
-    const start = dayStart.get(p.owner_id) ?? 0;
-    const workedToday =
-      p.last_contact_at !== null && new Date(p.last_contact_at).getTime() >= start;
-
-    if (!workedToday) row.outstanding += 1;
-  }
+  /* One number per rep, already counted. The loop that used to live here
+     walked every due row and re-derived each rep's day boundary in JS. */
+  const outstandingByOwner = new Map<string, number>(
+    outstanding.map((o) => [o.owner_id, Number(o.outstanding)])
+  );
+  for (const r of rows) r.outstanding = outstandingByOwner.get(r.userId) ?? 0;
 
   return rows.sort((a, b) => b.ftd - a.ftd || b.vip - a.vip || b.leads - a.leads);
 }
