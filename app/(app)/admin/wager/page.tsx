@@ -18,7 +18,7 @@ import { WagererTable } from "./WagererTable";
 import { ChurnList } from "../../ChurnList";
 import { AutoSync } from "./AutoSync";
 import { WagerTrend } from "./WagerTrend";
-import { RenderStamp } from "../../RenderStamp";
+import { RenderStamp, timed } from "../../RenderStamp";
 
 export const dynamic = "force-dynamic";
 
@@ -60,10 +60,11 @@ export default async function WagerPage({
      page already doing a dozen queries meant three full round trips stacked
      end to end for no reason - none of them needs another's answer. */
   const startedAt = Date.now();
+  const timings: { name: string; ms: number }[] = [];
 
   const [overview, report, churn, periods, team, repPeriods] =
     await Promise.all([
-      getWagerOverview(me.timezone, "", 1),
+      timed("overview", getWagerOverview(me.timezone, "", 1), timings),
       /* 1,000, not 2,000.
 
          The table pages client-side, so the limit is "how many exist at all"
@@ -73,11 +74,15 @@ export default async function WagerPage({
          pager comes from the totals function now, so this number only decides
          how far you can page, and it says so when it is holding fewer than
          exist. */
-      getWagerReport(reportPeriod.period, reportOwner || undefined, 1000),
-      getChurn(me.timezone),
-      getWagerPeriods(),
-      getTeam(),
-      getRepPeriods(),
+      timed(
+        "report",
+        getWagerReport(reportPeriod.period, reportOwner || undefined, 1000),
+        timings
+      ),
+      timed("churn", getChurn(me.timezone), timings),
+      timed("periods", getWagerPeriods(), timings),
+      timed("team", getTeam(), timings),
+      timed("repPeriods", getRepPeriods(), timings),
     ]);
 
   /* Every dollar figure on this page comes from wager_periods. The ledger
@@ -365,7 +370,7 @@ export default async function WagerPage({
         </>
       )}
 
-      <RenderStamp ms={Date.now() - startedAt} label="Wager" />
+      <RenderStamp ms={Date.now() - startedAt} label="Wager" parts={timings} />
     </>
   );
 }

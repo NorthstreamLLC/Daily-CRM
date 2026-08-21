@@ -26,7 +26,18 @@ import { cn } from "@/components/ui";
  * Admin-only, and deliberately plain text at the very bottom - it is
  * instrumentation, not a feature.
  */
-export function RenderStamp({ ms, label }: { ms: number; label?: string }) {
+export function RenderStamp({
+  ms,
+  label,
+  parts,
+}: {
+  ms: number;
+  label?: string;
+  /* Per-query timings. Six things run in parallel here, so the total is the
+     slowest one - and without the breakdown, "8.6 seconds" names six suspects
+     and convicts none. */
+  parts?: { name: string; ms: number }[];
+}) {
   const region = process.env.VERCEL_REGION ?? "local";
   const tone =
     ms < 300 ? "text-ink-subtle" : ms < 1000 ? "text-warning" : "text-danger";
@@ -43,6 +54,37 @@ export function RenderStamp({ ms, label }: { ms: number; label?: string }) {
           Set the function region to pdx1.
         </span>
       )}
+      {parts && parts.length > 0 && (
+        <>
+          <br />
+          <span className="text-ink-subtle">
+            {[...parts]
+              .sort((a, b) => b.ms - a.ms)
+              .map((p) => `${p.name} ${p.ms}ms`)
+              .join(" · ")}
+          </span>
+        </>
+      )}
     </p>
   );
+}
+
+/**
+ * Time one promise without changing what it returns.
+ *
+ * `const [a, b] = await Promise.all([timed("a", f()), timed("b", g())])` gives
+ * both the values and a record of which one was slow, which is the only way
+ * to tell a parallel batch's total from its culprit.
+ */
+export async function timed<T>(
+  name: string,
+  promise: Promise<T>,
+  into: { name: string; ms: number }[]
+): Promise<T> {
+  const t0 = Date.now();
+  try {
+    return await promise;
+  } finally {
+    into.push({ name, ms: Date.now() - t0 });
+  }
 }
