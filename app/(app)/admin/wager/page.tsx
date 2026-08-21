@@ -5,7 +5,7 @@ import { getMe } from "@/lib/queries";
 import {
   getRepPeriods,
   getTeam,
-  getWagerOverview,
+  getUnclaimedCount,
   getWagerPeriods,
   getWagerReport,
   resolveReportPeriod,
@@ -62,11 +62,12 @@ export default async function WagerPage({
   const startedAt = Date.now();
   const timings: { name: string; ms: number }[] = [];
 
-  const [overview, report, churn, periods, team, repPeriods] =
+  const [unclaimedCount, report, churn, periods, team, repPeriods] =
     await Promise.all([
-      /* The trace array is the same one the stamp prints, so the overview's
-         internal queries appear alongside the page-level ones. */
-      timed("overview", getWagerOverview(me.timezone, "", 1, timings), timings),
+      /* Was getWagerOverview - eleven queries, of which this page rendered
+         three numbers, two of them only to ask "is there any data yet?" which
+         periods already answers. Now it asks for the one it needs. */
+      timed("unclaimed", getUnclaimedCount(), timings),
       /* 1,000, not 2,000.
 
          The table pages client-side, so the limit is "how many exist at all"
@@ -91,7 +92,10 @@ export default async function WagerPage({
      (wager_external) is still read for counts and the retire action, but not
      for money - two sources for one total is how the page ended up showing
      $80,987,664 in one place and $81,066,311 in another. */
-  const { totals, unclaimed, snapshotCount, signals } = overview;
+  /* "Nothing has synced yet" is a question about the stored period facts, so
+     ask them - not a snapshot row count and a ledger total from a function
+     this page no longer calls. */
+  const nothingYet = periods.all.total === 0 && periods.month.total === 0;
 
   const reportQuery = new URLSearchParams({ period: reportChoice });
   if (reportOwner) reportQuery.set("owner", reportOwner);
@@ -118,7 +122,7 @@ export default async function WagerPage({
         </Link>
       </div>
 
-      {snapshotCount === 0 && totals.allTime === 0 && periods.all.total === 0 ? (
+      {nothingYet ? (
         <EmptyState
           icon={<Wallet size={18} />}
           title="No wager data yet"
@@ -256,9 +260,9 @@ export default async function WagerPage({
             {/* One-time housekeeping: draw the line under everyone who was
                 already wagering before any of this existed, so "unclaimed"
                 comes to mean "new, and worth chasing". */}
-            {unclaimed.count > 0 && (
+            {unclaimedCount > 0 && (
               <div className="mb-4">
-                <RetireUnclaimed count={unclaimed.count} />
+                <RetireUnclaimed count={unclaimedCount} />
               </div>
             )}
 

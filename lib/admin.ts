@@ -1415,3 +1415,16 @@ export async function getRecentAudit(limit = 10) {
     targetName: a.target_user ? names.get(a.target_user) ?? "—" : null,
   }));
 }
+
+/**
+ * How many wagerers belong to nobody.
+ *
+ * The Wager page used to get this from getWagerOverview - eleven queries
+ * building per-rep totals, top players and deposit signals, of which the page
+ * rendered none. It needed a count, so now it asks for a count.
+ */
+export async function getUnclaimedCount(): Promise<number> {
+  const supabase = createClient();
+  const { data } = await supabase.rpc("unclaimed_wagerer_count");
+  return typeof data === "number" ? data : 0;
+}

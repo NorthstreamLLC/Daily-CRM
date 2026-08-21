@@ -75,10 +75,22 @@ async function handle(request: Request) {
      grows without limit. Doing it here rather than as a separate schedule
      means there is one moving part, not two. */
   let pruned: number | null = null;
+  let prunedSnapshots: number | null = null;
   if (new Date().getUTCHours() === 0) {
     // Housekeeping must never take the sync down with it.
     const { data, error } = await admin.rpc("prune_wager_days", { p_keep_days: 75 });
     pruned = error ? null : typeof data === "number" ? data : null;
+
+    /* wager_snapshots was the one table nothing pruned. It gains a row every
+       half hour for every matched player on every code, and every window
+       calculation reads it.
+
+       100 days, and the function keeps the most recent row per (player,
+       source) whatever its age - that row IS the player's all-time figure, so
+       pruning it would silently zero the lifetime wager of anyone dormant. */
+    const snaps = await admin.rpc("prune_wager_snapshots", { p_keep_days: 100 });
+    prunedSnapshots =
+      snaps.error ? null : typeof snaps.data === "number" ? snaps.data : null;
 
     // Same reasoning: an inbox nobody prunes becomes a table nobody queries fast.
     await admin.rpc("prune_notifications");
@@ -92,6 +104,7 @@ async function handle(request: Request) {
     ok: true,
     seconds,
     pruned,
+    prunedSnapshots,
     advanced: outcome.advanced,
     sources: outcome.results.map((r) => ({
       name: r.name,
