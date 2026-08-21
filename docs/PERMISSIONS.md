@@ -130,3 +130,43 @@ setting an admin can flip — no deploy, no asking anybody.
 
 Admins are unaffected everywhere, including the Wager page, which is admin-only
 in the first place.
+
+## Grants, and why revoking from `public` is not enough
+
+Supabase ships default privileges that grant every new table and view in the
+`public` schema to **both** `anon` and `authenticated`, automatically, at the
+moment the object is created. Those are *direct* grants, and a direct grant
+survives `revoke ... from public`.
+
+So this, which looks careful, is not:
+
+```sql
+revoke all on public.some_view from public;
+revoke all on public.some_view from authenticated;
+```
+
+`anon` is still granted. `anon` is the role behind the publishable key, which
+ships inside the browser bundle of every page — signed in or not. Revoking the
+role that requires a login while leaving the one that does not is the worst
+possible half of the job.
+
+**Name all three, every time:**
+
+```sql
+revoke all on public.some_view from public, anon, authenticated;
+```
+
+Migration 043 fixed exactly this on `player_by_roobet` and prints every
+remaining `anon` grant in `public` when it runs, so the next one shows up in
+the output rather than in an advisor alert.
+
+### Views: invoker unless there is a reason
+
+| View | Mode | Why |
+| --- | --- | --- |
+| `players_enriched` | `security_invoker = true` | Read directly by reps. Must obey RLS. |
+| `player_by_roobet` | `security_invoker = true` | Read only from inside definer functions, which already bypass RLS as their owner. Invoker costs those callers nothing and means a stray grant no longer leaks the company's book. |
+
+A `security definer` view does not ask whether you may see a row. If one is
+genuinely needed, its safety rests entirely on its grants — which is a single
+point of failure, and the one that failed here.
