@@ -8,6 +8,7 @@ import { ChurnList } from "../ChurnList";
 import { getLeaderboard, resolveRange } from "@/lib/stats";
 import { formatDateTime, ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
+import { RenderStamp, timed } from "../RenderStamp";
 
 
 const money = (n: number) =>
@@ -82,11 +83,17 @@ export default async function AdminOverview({
     "today"
   );
 
+  const startedAt = Date.now();
+  const timings: { name: string; ms: number }[] = [];
+
   const [rows, audit, churn, wagerOverview] = await Promise.all([
-    getLeaderboard(me, range),
-    getRecentAudit(8),
-    getChurn(me.timezone),
-    getWagerOverview(me.timezone, "", 1),
+    timed("leaderboard", getLeaderboard(me, range), timings),
+    timed("audit", getRecentAudit(8), timings),
+    timed("churn", getChurn(me.timezone), timings),
+    /* This page pulls the wager overview too, for the deposit signals. When
+       that function was fetching the whole ledger it made Overview as slow as
+       Wager - one bad query, two slow pages. */
+    timed("wagerOverview", getWagerOverview(me.timezone, "", 1), timings),
   ]);
 
   const totals = rows.reduce(
@@ -543,6 +550,8 @@ export default async function AdminOverview({
           </Card>
         )}
       </section>
+
+      <RenderStamp ms={Date.now() - startedAt} label="Overview" parts={timings} />
     </>
   );
 }
