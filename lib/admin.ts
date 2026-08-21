@@ -129,7 +129,20 @@ export type FunnelStage = {
   playerCount: number;
 };
 
-export async function getFunnelStages(): Promise<FunnelStage[]> {
+/**
+ * Book composition by stage.
+ *
+ * TAKES AN OWNER, and the caller must decide.
+ *
+ * It used to take nothing and count every player in the company, while the
+ * call site on the personal Stats page carried the comment "RLS scopes this to
+ * the viewer's own players". It does not: player_counts_by_status is security
+ * definer, which is exactly the thing that bypasses RLS. Prime saw 244 players
+ * on his own stats page; he has one.
+ *
+ * Pass undefined only where the whole company is genuinely meant.
+ */
+export async function getFunnelStages(ownerId?: string): Promise<FunnelStage[]> {
   const supabase = createClient();
 
   const [{ data: stages }, { data: players }] = await Promise.all([
@@ -138,7 +151,7 @@ export async function getFunnelStages(): Promise<FunnelStage[]> {
       .select("name, sort_order, followup_days, next_action, counts_as_lead, is_ftd, is_dead")
       .order("sort_order"),
     supabase
-      .rpc("player_counts_by_status")
+      .rpc("player_counts_by_status", { p_owner: ownerId ?? null })
       .then((r) => ({ data: (r.data ?? []) as { status: string; players: number }[] })),
   ]);
 
@@ -160,7 +173,10 @@ export async function getSourcesAdmin(): Promise<LookupRow[]> {
   const [{ data: rows }, { data: players }] = await Promise.all([
     supabase.from("sources").select("name, sort_order, active").order("sort_order"),
     supabase
-      .rpc("player_counts_by_source")
+      /* Company-wide on purpose: this is the admin Settings page deciding
+         whether a source is safe to retire, which depends on everyone's usage
+         and not one rep's. Explicit now, rather than by omission. */
+      .rpc("player_counts_by_source", { p_owner: null })
       .then((r) => ({ data: (r.data ?? []) as { source: string; players: number }[] })),
   ]);
 

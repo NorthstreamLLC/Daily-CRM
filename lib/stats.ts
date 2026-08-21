@@ -83,6 +83,15 @@ export async function getActivity(
     .from("activity_log")
     .select("event_type, to_status")
     .eq("user_id", userId)
+    /* Only work on players who still exist.
+
+       activity_log.player_id is `on delete set null`, so deleting a player
+       leaves their "lead added" and "contact logged" rows behind and they
+       keep counting. That is not just a stale number: a rep could add fifty
+       players, be credited with fifty leads, delete them, and keep the
+       credit. Nothing is destroyed here - the rows stay for forensics - they
+       simply stop counting toward anybody's figures. */
+    .not("player_id", "is", null)
     .limit(100000);
 
   if (range.start) query = query.gte("occurred_at", range.start.toISOString());
@@ -192,6 +201,8 @@ export async function getTrend(
     .from("activity_log")
     .select("event_type, to_status, occurred_at")
     .eq("user_id", userId)
+    // Deleted players stop counting - see getActivity.
+    .not("player_id", "is", null)
     .gte("occurred_at", start.toISOString())
     .limit(50000);
 
@@ -250,6 +261,8 @@ export async function getRecords(
     .from("activity_log")
     .select("event_type, to_status, occurred_at")
     .eq("user_id", userId)
+    // Deleted players stop counting - see getActivity.
+    .not("player_id", "is", null)
     .in("event_type", ["player_created", "status_change", "deposit_reversed"])
     .order("occurred_at", { ascending: true })
     .limit(50000);
@@ -387,6 +400,8 @@ export async function getLeaderboard(
       let q = supabase
         .from("activity_log")
         .select("user_id, event_type, to_status")
+        // Deleted players stop counting - see getActivity.
+        .not("player_id", "is", null)
         .limit(200000);
       if (range.start) q = q.gte("occurred_at", range.start.toISOString());
       if (range.end) q = q.lt("occurred_at", range.end.toISOString());
@@ -398,6 +413,7 @@ export async function getLeaderboard(
       const { data } = await supabase
         .from("activity_log")
         .select("user_id")
+        .not("player_id", "is", null)
         .eq("event_type", "status_change")
         .eq("to_status", "VIP Transferred")
         .limit(200000);

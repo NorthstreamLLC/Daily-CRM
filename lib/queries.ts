@@ -307,6 +307,9 @@ export async function getTodayStats(me: Me, ownerId?: string) {
     .from("activity_log")
     .select("event_type, to_status")
     .eq("user_id", ownerId || me.id)
+    /* Deleted players stop counting. Their activity rows survive with a null
+       player_id, and without this a deleted lead still shows on Today. */
+    .not("player_id", "is", null)
     .gte("occurred_at", start)
     .lt("occurred_at", end);
 

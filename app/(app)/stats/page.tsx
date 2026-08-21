@@ -216,9 +216,11 @@ export default async function StatsPage({
       getSourcePerformance(ownerId, range),
       getTrend(ownerId, me.timezone, trendDays(range)),
       recordsPromise,
-      // RLS scopes this to the viewer's own players, so a rep sees their book's
-      // composition and an admin viewing here sees everyone's combined.
-      getFunnelStages(),
+      /* Scoped to whoever is being viewed. The comment that used to be here
+         claimed RLS did this - it does not, because the counting function is
+         security definer, and definer is precisely what bypasses RLS. This
+         page showed Prime the company's 244 players when he has one. */
+      getFunnelStages(ownerId),
       getWagerReport(wagerPeriod.period, ownerId),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
