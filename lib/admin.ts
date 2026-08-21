@@ -387,8 +387,22 @@ export async function getWagerOverview(
   /** Filters the unclaimed wagerer list. */
   search = "",
   /** 1-based page of the unclaimed list. */
-  page = 1
+  page = 1,
+  /* Optional per-query timings. This function does eleven separate things and
+     was 8.4 of the wager page's 8.5 seconds; fixing the two queries that
+     looked obviously wrong changed nothing, which is exactly when you stop
+     guessing and measure inside. */
+  trace?: { name: string; ms: number }[]
 ): Promise<WagerOverview> {
+  const mark = async <T,>(name: string, p: Promise<T> | PromiseLike<T>): Promise<T> => {
+    if (!trace) return p as Promise<T>;
+    const t0 = Date.now();
+    try {
+      return await p;
+    } finally {
+      trace.push({ name, ms: Date.now() - t0 });
+    }
+  };
   const supabase = createClient();
   const now = new Date();
   const nowIso = now.toISOString();
@@ -424,22 +438,31 @@ export async function getWagerOverview(
     weekDeltas,
     monthDeltas,
   ] = await Promise.all([
-    supabase.from("users").select("id, name, code").eq("active", true).order("name"),
-    supabase
-      .from("players")
-      .select(
-        "id, handle, reference, roobet_username, owner_id, weighted_wager, status, first_deposit_at"
-      )
-      .limit(100000),
-    supabase.from("wager_snapshots").select("id", { count: "exact", head: true }),
+    mark("users", supabase.from("users").select("id, name, code").eq("active", true).order("name")),
+    mark(
+      "players",
+      supabase
+        .from("players")
+        .select(
+          "id, handle, reference, roobet_username, owner_id, weighted_wager, status, first_deposit_at"
+        )
+        .limit(100000)
+    ),
+    mark(
+      "snapshotCount",
+      supabase.from("wager_snapshots").select("id", { count: "exact", head: true })
+    ),
     /* First nonzero wager per username - a dated deposit confirmation.
 
        Was: fetch up to 300,000 ledger rows ordered by time and keep the first
        occurrence of each username in JavaScript. Now one DISTINCT ON, which
        returns about 900 rows instead. */
-    supabase
-      .rpc("wager_first_seen")
-      .then((r) => (r.data ?? []) as { username: string; first_at: string }[]),
+    mark(
+      "firstSeen",
+      supabase
+        .rpc("wager_first_seen")
+        .then((r) => (r.data ?? []) as { username: string; first_at: string }[])
+    ),
 
     /* Latest reading per username per code.
 
@@ -447,23 +470,35 @@ export async function getWagerOverview(
        the last row per pair by hand. Together these two queries were 8.4 of
        the page's 8.5 seconds, moving 600,000 rows over the network to build
        two maps Postgres can build from ~2,600. */
-    supabase
-      .rpc("wager_ledger_latest")
-      .then(
-        (r) => (r.data ?? []) as { username: string; source: string; wagered: number }[]
-      ),
-    externalRpc(todayStart),
-    externalRpc(weekStart),
-    externalRpc(monthStart),
-    supabase
-      .rpc("wager_deltas", { p_start: todayStart, p_end: nowIso })
-      .then((r) => (r.data ?? []) as Delta[]),
-    supabase
-      .rpc("wager_deltas", { p_start: weekStart, p_end: nowIso })
-      .then((r) => (r.data ?? []) as Delta[]),
-    supabase
-      .rpc("wager_deltas", { p_start: monthStart, p_end: nowIso })
-      .then((r) => (r.data ?? []) as Delta[]),
+    mark(
+      "ledgerLatest",
+      supabase
+        .rpc("wager_ledger_latest")
+        .then(
+          (r) => (r.data ?? []) as { username: string; source: string; wagered: number }[]
+        )
+    ),
+    mark("extDay", externalRpc(todayStart)),
+    mark("extWeek", externalRpc(weekStart)),
+    mark("extMonth", externalRpc(monthStart)),
+    mark(
+      "deltasDay",
+      supabase
+        .rpc("wager_deltas", { p_start: todayStart, p_end: nowIso })
+        .then((r) => (r.data ?? []) as Delta[])
+    ),
+    mark(
+      "deltasWeek",
+      supabase
+        .rpc("wager_deltas", { p_start: weekStart, p_end: nowIso })
+        .then((r) => (r.data ?? []) as Delta[])
+    ),
+    mark(
+      "deltasMonth",
+      supabase
+        .rpc("wager_deltas", { p_start: monthStart, p_end: nowIso })
+        .then((r) => (r.data ?? []) as Delta[])
+    ),
   ]);
 
   const sum = (rows: Delta[]) => rows.reduce((a, r) => a + Number(r.delta), 0);
@@ -539,7 +574,10 @@ export async function getWagerOverview(
   /* Retired usernames were already wagering before the CRM existed. They stay
      in every company total but leave the working list, so the handful of
      genuinely new names are visible instead of buried under hundreds. */
-  const { data: ignoredRows } = await supabase.from("wager_ignored").select("username");
+  const { data: ignoredRows } = await mark(
+    "ignored",
+    supabase.from("wager_ignored").select("username")
+  );
   const ignored = new Set(
     (ignoredRows ?? []).map((r) => String(r.username).trim().toLowerCase())
   );
@@ -660,11 +698,14 @@ export async function getWagerOverview(
      first time" - which, the day after importing history, is everybody. Anyone
      whose first wager predates the baseline was already playing before we
      started watching and is never counted as new. */
-  const { data: baselineRow } = await supabase
-    .from("settings")
-    .select("value")
-    .eq("key", "wager_new_player_baseline")
-    .maybeSingle();
+  const { data: baselineRow } = await mark(
+    "baseline",
+    supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "wager_new_player_baseline")
+      .maybeSingle()
+  );
 
   const baseline = String(baselineRow?.value ?? "").trim();
   const baselineMs = /^\d{4}-\d{2}-\d{2}$/.test(baseline)

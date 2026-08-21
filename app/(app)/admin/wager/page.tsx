@@ -64,7 +64,9 @@ export default async function WagerPage({
 
   const [overview, report, churn, periods, team, repPeriods] =
     await Promise.all([
-      timed("overview", getWagerOverview(me.timezone, "", 1), timings),
+      /* The trace array is the same one the stamp prints, so the overview's
+         internal queries appear alongside the page-level ones. */
+      timed("overview", getWagerOverview(me.timezone, "", 1, timings), timings),
       /* 1,000, not 2,000.
 
          The table pages client-side, so the limit is "how many exist at all"
