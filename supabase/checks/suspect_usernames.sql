@@ -89,3 +89,28 @@ where p.roobet_username is not null
   and btrim(p.roobet_username) <> ''
 group by u.name
 order by pct_unmatched desc nulls last;
+
+
+-- ---------------------------------------------------------------------------
+-- Did the undo actually undo it?
+--
+-- A book uploaded into the wrong rep and then removed should leave nothing.
+-- The way to check is the reference: a player numbered TU-0641 sitting under
+-- Chella means a row from that import survived the undo.
+--
+-- This matters beyond tidiness. references are unique ACROSS the whole table,
+-- and the reference counter reads the CODE, not the owner (migration 039). A
+-- stranded TU- row under another owner is exactly what made Tuna's import
+-- collide in the first place.
+-- ---------------------------------------------------------------------------
+select
+  u.name       as sitting_in_this_book,
+  u.code       as their_code,
+  substring(p.reference from '^[A-Za-z]+') as reference_says,
+  count(*)     as players,
+  min(p.reference) || ' … ' || max(p.reference) as range
+from public.players p
+join public.users u on u.id = p.owner_id
+where p.reference !~ ('^' || u.code || '-[0-9]+$')
+group by u.name, u.code, substring(p.reference from '^[A-Za-z]+')
+order by players desc;
