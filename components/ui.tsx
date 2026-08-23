@@ -231,14 +231,19 @@ export function Badge({
   icon,
   children,
   className,
+  title,
 }: {
   tone?: Tone;
   icon?: ReactNode;
   children: ReactNode;
   className?: string;
+  /* A badge short enough to fit a table cell is usually too short to explain
+     itself. "4" next to a red triangle told nobody anything for a month. */
+  title?: string;
 }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-caption font-medium",
         BADGE_TONE[tone],

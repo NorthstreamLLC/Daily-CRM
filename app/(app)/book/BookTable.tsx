@@ -451,9 +451,16 @@ export function BookTable({
                       <div className="flex items-center gap-2">
                         <CopyHandle handle={p.handle} />
                         <OpenProfile handle={p.handle} source={p.source} />
+                        {/* Was a bare number. "4" beside a red triangle reads
+                            as an error code, not as "chased four times and
+                            still no username, so this one can go". */}
                         {readyForDead && (
-                          <Badge tone="danger" icon={<AlertTriangle size={10} />}>
-                            {p.followup_attempts}
+                          <Badge
+                            tone="danger"
+                            icon={<AlertTriangle size={10} />}
+                            title={`Chased ${p.followup_attempts} times and still no Roobet username. Ready to mark as a dead lead.`}
+                          >
+                            {p.followup_attempts} tries
                           </Badge>
                         )}
                       </div>

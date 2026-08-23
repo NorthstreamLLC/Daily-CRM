@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/components/ui";
-import { Check, MessageSquare } from "@/components/icons";
+import { Check, ExternalLink } from "@/components/icons";
 
 /**
  * The handle, as a one-click copy.
@@ -111,7 +111,7 @@ export function OpenProfile({
       className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded
                  text-ink-subtle transition-colors hover:bg-sunken hover:text-accent"
     >
-      <MessageSquare size={12} />
+      <ExternalLink size={12} />
       <span className="sr-only">Open profile</span>
     </a>
   );

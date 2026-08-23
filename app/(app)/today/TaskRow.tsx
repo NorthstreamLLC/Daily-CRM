@@ -151,8 +151,12 @@ export function TaskRow({
               <Badge tone="warning">No username</Badge>
             )}
             {readyForDead && (
-              <Badge tone="danger" icon={<AlertTriangle size={10} />}>
-                {player.followup_attempts} attempts
+              <Badge
+                tone="danger"
+                icon={<AlertTriangle size={10} />}
+                title={`Chased ${player.followup_attempts} times and still no Roobet username. Ready to mark as a dead lead.`}
+              >
+                {player.followup_attempts} tries
               </Badge>
             )}
           </div>
