@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Me, Player } from "@/lib/queries";
+import { canSeeWager, scrubWager, type Me, type Player } from "@/lib/queries";
 import { DEFAULT_PAGE_SIZE } from "@/lib/pagination";
 
 export { PAGE_SIZES, DEFAULT_PAGE_SIZE, resolvePageSize } from "@/lib/pagination";
@@ -99,7 +99,7 @@ export async function getBook(
 
   const total = count ?? 0;
   return {
-    rows: (data ?? []) as unknown as Player[],
+    rows: scrubWager((data ?? []) as unknown as Player[], await canSeeWager(me)),
     total,
     page,
     pageSize,

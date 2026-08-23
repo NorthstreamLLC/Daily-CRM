@@ -263,6 +263,12 @@ export function PlayerDetail({
      falls back to read-only rather than the panel refusing to open. */
   sources?: string[];
 }) {
+  /* Whether the figure is shown is decided on the SERVER, by scrubWager: if a
+     rep may not see it, weighted_wager is not in the row at all. So this asks
+     "did the server send one", not "is this person allowed" - which means the
+     panel cannot get the answer wrong, and cannot be got wrong again by
+     somebody rendering it somewhere new. */
+  const showWager = player.weighted_wager !== undefined;
   const [tab, setTab] = useState<"details" | "messages" | "history">("details");
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -368,16 +374,18 @@ export function PlayerDetail({
               label="Attempts"
               value={player.followup_attempts ? String(player.followup_attempts) : "0"}
             />
-            <Meta
-              label="Wagered"
-              value={
-                player.weighted_wager && Number(player.weighted_wager) > 0
-                  ? `$${Number(player.weighted_wager).toLocaleString(undefined, {
-                      maximumFractionDigits: 0,
-                    })}`
-                  : "—"
-              }
-            />
+            {showWager && (
+              <Meta
+                label="Wagered"
+                value={
+                  player.weighted_wager && Number(player.weighted_wager) > 0
+                    ? `$${Number(player.weighted_wager).toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}`
+                    : "—"
+                }
+              />
+            )}
           </dl>
 
           <div className="sm:col-span-2">

@@ -189,7 +189,7 @@ export async function getDueNow(me: Me, ownerId?: string): Promise<Player[]> {
     .limit(500);
 
   if (error) throw error;
-  return (data ?? []) as unknown as Player[];
+  return scrubWager((data ?? []) as unknown as Player[], await canSeeWager(me));
 }
 
 /**
@@ -231,7 +231,7 @@ export async function getComingUp(
     .limit(limit);
 
   if (error) throw error;
-  return (data ?? []) as unknown as Player[];
+  return scrubWager((data ?? []) as unknown as Player[], await canSeeWager(me));
 }
 
 /** How many are scheduled in the window, without fetching them. */
@@ -307,7 +307,7 @@ export async function getDeadLeads(
     .limit(limit);
 
   if (error) throw error;
-  return (data ?? []) as unknown as Player[];
+  return scrubWager((data ?? []) as unknown as Player[], await canSeeWager(me));
 }
 
 /**
@@ -487,4 +487,25 @@ export async function canSeeWager(me: Me): Promise<boolean> {
   if (me.role === "admin") return true;
   const settings = await getSettings(["reps_see_wager"]);
   return settings.reps_see_wager === "true";
+}
+
+/**
+ * Take the figure out of the data, not just off the screen.
+ *
+ * Hiding a column is not hiding a number. Every player row is serialised into
+ * the page for the browser to hydrate, so a rep with the setting off could
+ * still read weighted_wager out of the HTML - and the detail panel was
+ * printing it in plain sight anyway, which is how this was found.
+ *
+ * Doing it here means the rule is enforced once, at the point the rows leave
+ * the server, rather than at each of the several places that render them. Any
+ * component added later gets it for free, including ones nobody thought to
+ * check.
+ */
+export function scrubWager<T extends { weighted_wager?: number | null }>(
+  rows: T[],
+  showWager: boolean
+): T[] {
+  if (showWager) return rows;
+  return rows.map(({ weighted_wager: _omit, ...rest }) => rest as T);
 }
