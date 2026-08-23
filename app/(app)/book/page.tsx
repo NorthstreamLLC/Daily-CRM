@@ -222,6 +222,7 @@ export default async function BookPage({
             showWager={showWager}
             rows={book.rows}
             statuses={statuses}
+            sources={sources}
             timezone={me.timezone}
             attemptsThreshold={Number(settings.followup_attempts_before_dead) || 3}
             overdueHours={Number(settings.overdue_highlight_hours) || 24}

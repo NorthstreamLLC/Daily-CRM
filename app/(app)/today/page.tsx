@@ -293,6 +293,7 @@ export default async function TodayPage({
 
   const rowProps = {
     statuses,
+    sources,
     timezone: me.timezone,
     attemptsThreshold,
     overdueHours,

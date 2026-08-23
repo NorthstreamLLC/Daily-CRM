@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Player } from "@/lib/queries";
+import { usernameLooksWrong } from "@/lib/username";
 import { Badge, Select, Textarea, Input, Button, cn } from "@/components/ui";
 import { AlertTriangle, Check, MessageSquare, History, X } from "@/components/icons";
 import {
@@ -253,10 +254,14 @@ export function PlayerDetail({
   player,
   timezone,
   onClose,
+  sources,
 }: {
   player: Player;
   timezone: string;
   onClose?: () => void;
+  /* Optional so a caller that has not got the list yet still renders - Source
+     falls back to read-only rather than the panel refusing to open. */
+  sources?: string[];
 }) {
   const [tab, setTab] = useState<"details" | "messages" | "history">("details");
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
@@ -311,13 +316,24 @@ export function PlayerDetail({
         </div>
       ) : tab === "details" ? (
         <div className="grid gap-4 p-4 sm:grid-cols-2">
-          <AutoSaveField
-            player={player}
-            field="roobet_username"
-            label="Roobet username"
-            placeholder="Not signed up yet"
-            hint="Filling this in stops them resurfacing every day and resets attempts."
-          />
+          <div>
+            <AutoSaveField
+              player={player}
+              field="roobet_username"
+              label="Roobet username"
+              placeholder="Not signed up yet"
+              hint="Filling this in stops them resurfacing every day and resets attempts."
+            />
+            {/* Said where it can be fixed. A warning on an admin report is a
+                task for you; a warning under the box is a task for whoever
+                typed it, which is the person who knows what it should say. */}
+            {usernameLooksWrong(player.roobet_username) && (
+              <p className="mt-1 text-caption text-warning">
+                {usernameLooksWrong(player.roobet_username)} Their wager will
+                never match until this is right.
+              </p>
+            )}
+          </div>
           <AutoSaveField
             player={player}
             field="handle"
@@ -333,9 +349,20 @@ export function PlayerDetail({
               placeholder="What was said, what they need, anything worth remembering."
             />
           </div>
+
+          {/* Source was read-only for no reason: the server action already
+              accepted it, the Book already filters on it, and it decides
+              whether the open-profile link appears. It was simply never
+              wired to a control. */}
+          {sources && sources.length > 0 && (
+            <div className="sm:col-span-2">
+              <SourceField player={player} sources={sources} />
+            </div>
+          )}
+
           <dl className="sm:col-span-2 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-3 text-small sm:grid-cols-5">
             <Meta label="Reference" value={player.reference} />
-            <Meta label="Source" value={player.source ?? "—"} />
+            {!sources?.length && <Meta label="Source" value={player.source ?? "—"} />}
             <Meta label="Added" value={formatDate(player.assigned_at, timezone)} />
             <Meta
               label="Attempts"
@@ -407,6 +434,59 @@ export function PlayerDetail({
  * player does not have yet. Reversing a deposit matters because the stamp is
  * permanent by design, so undoing a mistake has to be explicit.
  */
+/**
+ * Where this player came from.
+ *
+ * A select rather than free text, because Source is matched exactly in three
+ * places - the Book filter, the profile link, and the message channel hint.
+ * "Twitter", "twitter" and "X" typed by three different reps are three
+ * different sources to all of them, and the rep who typed it is the last
+ * person who would notice.
+ */
+function SourceField({ player, sources }: { player: Player; sources: string[] }) {
+  const [value, setValue] = useState(player.source ?? "");
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  /* A source that has since been retired still shows, or changing anything
+     else on this player would quietly reassign them to the first option. */
+  const options = sources.includes(value) || !value ? sources : [value, ...sources];
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-small font-medium text-ink-muted">Source</span>
+      <Select
+        value={value}
+        disabled={pending}
+        onChange={(e) => {
+          const next = e.target.value;
+          const previous = value;
+          setValue(next);
+          setError(null);
+          start(async () => {
+            const res = await updatePlayerField(player.id, "source", next);
+            if (res?.error) {
+              setValue(previous); // put back what is actually stored
+              setError(res.error);
+            } else {
+              router.refresh();
+            }
+          });
+        }}
+      >
+        <option value="">Not recorded</option>
+        {options.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </Select>
+      {error && <p className="mt-1 text-caption text-danger">{error}</p>}
+    </label>
+  );
+}
+
 function PlayerCorrections({ player }: { player: Player }) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ message?: string; warning?: string; error?: string } | null>(
@@ -439,17 +519,24 @@ function PlayerCorrections({ player }: { player: Player }) {
           {watching ? "Stop watching" : "Watch for drop-off"}
         </Button>
 
-        {player.roobet_username?.trim() && (
-          <Button
-            size="sm"
-            loading={pending}
-            onClick={() =>
-              start(async () => setResult(await refreshPlayerWager(player.id)))
-            }
-          >
-            Re-check wager
-          </Button>
-        )}
+        {/* Only when there is something a leaderboard could actually match.
+            Offering "Re-check wager" against "creating account and grabbing
+            stake stats" is a button that promises a search and returns
+            nothing found - which reads as "they have not wagered" rather than
+            "this was never a username". The hint under the field says what to
+            do instead. */}
+        {player.roobet_username?.trim() &&
+          !usernameLooksWrong(player.roobet_username) && (
+            <Button
+              size="sm"
+              loading={pending}
+              onClick={() =>
+                start(async () => setResult(await refreshPlayerWager(player.id)))
+              }
+            >
+              Re-check wager
+            </Button>
+          )}
 
         {player.first_deposit_at &&
           (confirming ? (

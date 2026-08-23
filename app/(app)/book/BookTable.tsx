@@ -98,6 +98,7 @@ export function BookTable({
   readOnly = false,
   team,
   showWager = true,
+  sources = [],
 }: {
   rows: Player[];
   statuses: StatusOption[];
@@ -113,6 +114,8 @@ export function BookTable({
   team?: { id: string; name: string; code: string }[];
   /** Admins always; a rep only if "Show wager figures to reps" is on. */
   showWager?: boolean;
+  /** Feeds the Source select in the detail panel. */
+  sources?: string[];
 }) {
   const COLUMNS = columnsFor(showWager);
 
@@ -550,6 +553,7 @@ export function BookTable({
                         <PlayerDetail
                           player={p}
                           timezone={timezone}
+                          sources={sources}
                           onClose={() => setExpanded(null)}
                         />
                       </td>
@@ -613,7 +617,12 @@ export function BookTable({
                 </div>
               </div>
               {isOpen && (
-                <PlayerDetail player={p} timezone={timezone} onClose={() => setExpanded(null)} />
+                <PlayerDetail
+                  player={p}
+                  timezone={timezone}
+                  sources={sources}
+                  onClose={() => setExpanded(null)}
+                />
               )}
             </div>
           );

@@ -31,6 +31,7 @@ export function TaskRow({
   dayStartMs,
   showComplete = true,
   striped = false,
+  sources = [],
 }: {
   player: Player;
   statuses: StatusOption[];
@@ -42,6 +43,8 @@ export function TaskRow({
   showComplete?: boolean;
   /** Alternating background, so a long list stays readable across columns. */
   striped?: boolean;
+  /** Feeds the Source select in the detail panel. */
+  sources?: string[];
 }) {
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -219,7 +222,12 @@ export function TaskRow({
       </div>
 
       {open && (
-        <PlayerDetail player={player} timezone={timezone} onClose={() => setOpen(false)} />
+        <PlayerDetail
+          player={player}
+          timezone={timezone}
+          sources={sources}
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   );
