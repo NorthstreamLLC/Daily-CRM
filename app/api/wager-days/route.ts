@@ -70,7 +70,25 @@ export async function POST(request: Request) {
   /* What is already held. Grouped in the database rather than counted here -
      one row per day is a handful of rows, where the raw table is tens of
      thousands. */
-  const { data: held } = await admin.rpc("wager_day_totals", { p_days: days });
+  const { data: held, error: heldError } = await admin.rpc("wager_day_totals", {
+    p_days: days,
+  });
+
+  /* Said out loud rather than swallowed. Without this, a missing migration
+     leaves `held` null, every day looks absent, and the endpoint cheerfully
+     refetches thirty days while reporting success - which is indistinguishable
+     from working. */
+  if (heldError) {
+    return NextResponse.json(
+      {
+        error:
+          /does not exist|schema cache/i.test(heldError.message)
+            ? "Run migration 20260812000050_wager_day_totals.sql first - this needs it to know which days are missing."
+            : heldError.message,
+      },
+      { status: 400 }
+    );
+  }
   const byDay = new Map<string, number>(
     ((held ?? []) as { day: string; total: number }[]).map((r) => [
       String(r.day).slice(0, 10),
