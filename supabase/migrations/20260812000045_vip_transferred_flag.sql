@@ -34,6 +34,11 @@
 alter table public.players
   add column if not exists vip_transferred_at timestamptz;
 
+/* players_enriched is `select p.*`, and Postgres freezes that star when the
+   view is created. Adding a column here does NOT add it to the view, and the
+   app reads the view - so without the rebuild in migration 046 every page
+   that loads a player throws. Run 046 straight after this one. */
+
 comment on column public.players.vip_transferred_at is
   'When a rep marked this player as handed to the VIP team. Set by hand, '
   'never inferred from status - a player at Active may have got there through '
