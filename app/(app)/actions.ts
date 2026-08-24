@@ -847,7 +847,8 @@ export async function addPlayer(
  */
 export async function setVipTransferred(
   playerId: string,
-  on: boolean
+  on: boolean,
+  when?: string | null
 ): Promise<{ error?: string; message?: string }> {
   const me = await getMe();
   if (!me) return { error: "Not signed in." };
@@ -856,16 +857,52 @@ export async function setVipTransferred(
   const { error } = await supabase.rpc("set_vip_transferred", {
     p_player: playerId,
     p_on: on,
+    p_when: when ? dayToTimestamp(when) : null,
   });
 
   if (error) return { error: error.message };
 
   refresh();
-  return {
-    message: on
-      ? "Marked as transferred to the VIP team."
-      : "VIP transfer mark removed.",
-  };
+  return { message: on ? "VIP Transfer recorded." : "VIP Transfer removed." };
+}
+
+/**
+ * Correct the day a lead was added.
+ *
+ * Worth knowing before using it: assigned_at feeds next_followup_at for anyone
+ * never contacted, so moving this date moves that player in or out of today's
+ * queue. That is the right behaviour - a lead that really arrived in March
+ * really is overdue - but the queue will change underneath you.
+ */
+export async function setAddedDate(
+  playerId: string,
+  day: string
+): Promise<{ error?: string; message?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("set_added_date", {
+    p_player: playerId,
+    p_when: dayToTimestamp(day),
+  });
+
+  if (error) return { error: error.message };
+
+  refresh();
+  return { message: "Added date updated." };
+}
+
+/**
+ * A date picker gives back "2026-03-14" with no time and no zone.
+ *
+ * Midday UTC, deliberately. Midnight would land on the previous calendar day
+ * for anyone west of Greenwich - a rep in New York picking the 14th would see
+ * it counted on the 13th - and every zone the team works in is within twelve
+ * hours of noon, so noon is the only choice that cannot shift the day.
+ */
+function dayToTimestamp(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toISOString();
 }
 
 export async function setVipWatch(

@@ -10,6 +10,7 @@ import {
   changeStatus,
   refreshPlayerWager,
   reverseFirstDeposit,
+  setAddedDate,
   setVipTransferred,
   setVipWatch,
   updatePlayerField,
@@ -374,7 +375,7 @@ export function PlayerDetail({
           <dl className="sm:col-span-2 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-line pt-3 text-small sm:grid-cols-5">
             <Meta label="Reference" value={player.reference} />
             {!sources?.length && <Meta label="Source" value={player.source ?? "—"} />}
-            <Meta label="Added" value={formatDate(player.assigned_at, timezone)} />
+            <AddedDate player={player} />
             <Meta
               label="Attempts"
               value={player.followup_attempts ? String(player.followup_attempts) : "0"}
@@ -448,6 +449,62 @@ export function PlayerDetail({
  * permanent by design, so undoing a mistake has to be explicit.
  */
 /**
+ * When this lead was added - editable, because the import often got it wrong.
+ *
+ * Some sheets carried a formula, some a re-typed date, some the day the row was
+ * last edited. The import kept whatever was there, faithfully, including when
+ * what was there was nonsense.
+ *
+ * Changing it moves the activity_log row too, so the Stats page and the player
+ * do not end up telling different stories - and it will move the player in or
+ * out of today's queue, because next_followup_at is derived from this date for
+ * anyone never contacted.
+ */
+function AddedDate({ player }: { player: Player }) {
+  const [day, setDay] = useState(player.assigned_at.slice(0, 10));
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  return (
+    <div>
+      <dt className="text-caption text-ink-subtle">
+        Added {pending && <span>· saving…</span>}
+      </dt>
+      <dd>
+        <input
+          type="date"
+          value={day}
+          max={new Date().toISOString().slice(0, 10)}
+          disabled={pending}
+          aria-label={`Date ${player.handle} was added`}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (!next) return;
+            const previous = day;
+            setDay(next);
+            setError(null);
+            start(async () => {
+              const res = await setAddedDate(player.id, next);
+              if (res?.error) {
+                setDay(previous);
+                setError(res.error);
+              } else {
+                router.refresh();
+              }
+            });
+          }}
+          className="-ml-1 h-7 rounded-control border border-transparent bg-transparent px-1
+                     text-small text-ink outline-none hover:border-line-strong
+                     focus:border-accent focus:bg-surface"
+        />
+        {error && <p className="text-caption text-danger">{error}</p>}
+      </dd>
+    </div>
+  );
+}
+
+/**
  * VIP Transfer - ticked by the rep, counted in the stats.
  *
  * A tick box rather than something read off the status, because status cannot
@@ -496,13 +553,44 @@ function VipTransferToggle({
           className="h-4 w-4 shrink-0 rounded border-line-strong accent-accent"
         />
         <span className="text-small font-medium text-ink">VIP Transfer</span>
-        {on && when && (
-          <span className="text-caption text-ink-subtle">
-            {formatDate(when, timezone)}
-          </span>
-        )}
         {pending && <span className="text-caption text-ink-subtle">Saving…</span>}
       </label>
+
+      {/* The date only exists once it is ticked, so it only appears then.
+          Ticking stamps today; reps working back through a year of book need
+          to move it to when it actually happened. */}
+      {on && (
+        <div className="mt-2 flex items-center gap-2 pl-[26px]">
+          <label className="text-caption text-ink-subtle" htmlFor={`vip-when-${player.id}`}>
+            on
+          </label>
+          <input
+            id={`vip-when-${player.id}`}
+            type="date"
+            value={when ? when.slice(0, 10) : ""}
+            max={new Date().toISOString().slice(0, 10)}
+            disabled={pending}
+            onChange={(e) => {
+              const day = e.target.value;
+              if (!day) return;
+              const previous = when;
+              setWhen(day);
+              setError(null);
+              start(async () => {
+                const res = await setVipTransferred(player.id, true, day);
+                if (res?.error) {
+                  setWhen(previous);
+                  setError(res.error);
+                } else {
+                  router.refresh();
+                }
+              });
+            }}
+            className="h-8 rounded-control border border-line-strong bg-surface px-2
+                       text-small text-ink outline-none focus:border-accent"
+          />
+        </div>
+      )}
       {error && <p className="mt-1 pl-[26px] text-caption text-danger">{error}</p>}
     </div>
   );
