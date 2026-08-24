@@ -47,6 +47,12 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
     });
   }, [points, sort, desc]);
 
+  /* Gaps are counted, not just drawn. "8 days" next to "5 days never
+     captured" is the difference between a quiet fortnight and a broken sync,
+     and the header is where somebody would actually notice. */
+  const gaps = points.filter((p) => p.missing).length;
+  const captured = points.length - gaps;
+
   const max = Math.max(1, ...points.map((p) => p.total));
   const totalAll = points.reduce((a, p) => a + p.total, 0);
   const best = points.reduce(
@@ -114,8 +120,17 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
             </span>
             <span className="mx-2 text-ink-subtle">·</span>
             <span className="tabular">{money(totalAll)}</span> over{" "}
-            {points.length} {grain}
-            {points.length === 1 ? "" : "s"}
+            {captured} {grain}
+            {captured === 1 ? "" : "s"}
+            {gaps > 0 && (
+              <>
+                <span className="mx-2 text-ink-subtle">·</span>
+                <span className="font-medium text-warning">
+                  {gaps} {grain}
+                  {gaps === 1 ? "" : "s"} never captured
+                </span>
+              </>
+            )}
           </p>
         )}
       </div>
@@ -129,14 +144,30 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
           {/* Shape first, so a glance still works. */}
           <div className="flex h-20 items-end gap-[2px] px-3 pt-3">
             {points.map((p) => (
+              /* A missing period is drawn full height in a warning tint, not
+                 as a flat bar. A flat bar says "nobody wagered"; this says
+                 "we never looked" - and those are opposite conclusions about
+                 whether anything is wrong. */
               <span
                 key={p.start}
-                title={`${p.label} — ${money(p.total)}`}
+                title={
+                  p.missing
+                    ? `${p.label} — the sync never recorded this ${grain}`
+                    : `${p.label} — ${money(p.total)}`
+                }
                 className={cn(
                   "flex-1 rounded-t-sm",
-                  p.start === runningStart ? "bg-accent/30" : "bg-accent/60"
+                  p.missing
+                    ? "bg-warning/25 outline-dashed outline-1 outline-offset-[-1px] outline-warning/50"
+                    : p.start === runningStart
+                      ? "bg-accent/30"
+                      : "bg-accent/60"
                 )}
-                style={{ height: `${Math.max(p.total > 0 ? 2 : 1, (p.total / max) * 100)}%` }}
+                style={{
+                  height: p.missing
+                    ? "100%"
+                    : `${Math.max(p.total > 0 ? 2 : 1, (p.total / max) * 100)}%`,
+                }}
               />
             ))}
           </div>
@@ -182,15 +213,28 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
                         </span>
                       )}
                     </td>
-                    <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
-                      {r.wagerers.toLocaleString()}
-                    </td>
-                    <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
-                      {money(r.average)}
-                    </td>
-                    <td className="tabular px-4 py-2 text-right text-body font-semibold text-ink">
-                      {money(r.total)}
-                    </td>
+                    {r.missing ? (
+                      /* One cell across the figures rather than three zeros.
+                         Zeros in the money column would be read as money. */
+                      <td
+                        colSpan={3}
+                        className="px-4 py-2 text-right text-small font-medium text-warning"
+                      >
+                        Not captured — the sync did not run for this {grain}
+                      </td>
+                    ) : (
+                      <>
+                        <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
+                          {r.wagerers.toLocaleString()}
+                        </td>
+                        <td className="tabular px-4 py-2 text-right text-small text-ink-muted">
+                          {money(r.average)}
+                        </td>
+                        <td className="tabular px-4 py-2 text-right text-body font-semibold text-ink">
+                          {money(r.total)}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

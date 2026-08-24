@@ -381,6 +381,8 @@ export type HistoryPoint = {
   label: string;
   total: number;
   wagerers: number;
+  /** True when the sync never recorded this period. Not the same as zero. */
+  missing?: boolean;
 };
 
 export type WagerHistory = {
@@ -411,6 +413,57 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+/**
+ * Put the days the sync never recorded back into the series.
+ *
+ * The wager page draws whatever rows exist. A day the sync missed has no row,
+ * so it was simply absent from the chart and the table - and an absent day
+ * looks exactly like a quiet one. In August the page showed 24, 22, 21, 20,
+ * 17, 15, 14 and 12, and nothing said the 23rd, 19th, 18th, 16th and 13th had
+ * never been captured at all.
+ *
+ * That is the dangerous shape for this particular page: wager figures feed
+ * commission, so the sync quietly dying looks like players quietly stopping.
+ *
+ * Only fills BETWEEN the first and last point held. A hole in the middle is a
+ * fact about the sync; nothing before the first record is a fact about
+ * anything - the sync simply had not started.
+ */
+function fillGaps(points: HistoryPoint[], grain: HistoryGrain): HistoryPoint[] {
+  if (points.length < 2 || grain === "month") return points;
+
+  const step = grain === "week" ? 7 : 1;
+  const held = new Map(points.map((p) => [p.start, p]));
+  const out: HistoryPoint[] = [];
+
+  const first = new Date(points[0].start + "T00:00:00Z");
+  const last = new Date(points[points.length - 1].start + "T00:00:00Z");
+
+  for (let d = first; d <= last; d = new Date(d.getTime() + step * 86_400_000)) {
+    const key = d.toISOString().slice(0, 10);
+    const existing = held.get(key);
+    if (existing) {
+      out.push(existing);
+      continue;
+    }
+    out.push({
+      start: key,
+      label:
+        (grain === "week" ? "w/c " : "") +
+        new Intl.DateTimeFormat("en-GB", {
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        }).format(d),
+      total: 0,
+      wagerers: 0,
+      missing: true,
+    });
+  }
+
+  return out;
+}
 
 function utcMonthStart(d: Date) {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
@@ -535,7 +588,7 @@ export async function getWagerPeriods(): Promise<WagerPeriods> {
   /* Already oldest-first: wager_all_history picks the most recent n with a
      window function, then orders ascending, so no reversing here. */
   const series = (rows: HistRow[], grain: HistoryGrain) =>
-    rows.map(point(grain));
+    fillGaps(rows.map(point(grain)), grain);
 
   return {
     all: fold(allRows),
