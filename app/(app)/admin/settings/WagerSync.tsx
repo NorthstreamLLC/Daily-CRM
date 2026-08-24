@@ -73,6 +73,11 @@ export function WagerSync({
   const [pending, start] = useTransition();
   const [rowResult, setRowResult] = useState<string | null>(null);
 
+  const [fillingDays, setFillingDays] = useState(false);
+  const [dayResult, setDayResult] =
+    useState<{ message: string; filled: { day: string; why: string; rows: number; errors: string[] }[] } | null>(null);
+  const [dayError, setDayError] = useState<string | null>(null);
+
   const formRef = useRef<HTMLFormElement>(null);
   const lastMessage = useRef<string | undefined>(undefined);
 
@@ -102,6 +107,33 @@ export function WagerSync({
       setBackfillError((e as Error).message);
     } finally {
       setBackfilling(false);
+    }
+  }
+
+  /* Separate from both the sync and the backfill, because it answers a
+     question neither of them can: "give me back a day we missed".
+
+     The sync only ever writes today (and yesterday, briefly). The backfill
+     only writes months. A day that was missed had no route back at all -
+     pressing Sync again looked like it should work and never could. */
+  async function fillMissingDays() {
+    setFillingDays(true);
+    setDayResult(null);
+    setDayError(null);
+    try {
+      const response = await fetch("/api/wager-days", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: 30 }),
+      });
+      const body = await response.json();
+      if (body.error) setDayError(body.error);
+      else setDayResult(body);
+      router.refresh();
+    } catch (e) {
+      setDayError((e as Error).message);
+    } finally {
+      setFillingDays(false);
     }
   }
 
@@ -390,6 +422,48 @@ export function WagerSync({
             <Notice tone="danger">{backfillError}</Notice>
           </div>
         )}
+
+        {/* ------------------------------------------------------- Missing days */}
+        <div className="mt-6 border-t border-line pt-4">
+          <h3 className="text-label font-semibold uppercase tracking-wide text-ink-subtle">
+            Missing days
+          </h3>
+          <p className="mt-1 text-small text-ink-muted">
+            Asks Roobet again for any day in the last 30 that the sync never
+            captured, plus any that look half-finished. The ordinary sync cannot
+            do this — it only ever writes today, and the backfill only writes
+            months. Today is left alone; the live sync owns it.
+          </p>
+
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              disabled={sources.filter((s) => s.active).length === 0}
+              loading={fillingDays}
+              onClick={fillMissingDays}
+            >
+              {fillingDays ? "Refetching… don't close this tab" : "Fill missing days"}
+            </Button>
+          </div>
+
+          {dayError && (
+            <div className="mt-3">
+              <Notice tone="danger">{dayError}</Notice>
+            </div>
+          )}
+
+          {dayResult && (
+            <div className="mt-3 space-y-2">
+              <Notice tone="success">{dayResult.message}</Notice>
+              {dayResult.filled.map((f) => (
+                <Notice key={f.day} tone={f.errors.length > 0 ? "warning" : "success"}>
+                  {f.day} ({f.why}): {f.rows} row{f.rows === 1 ? "" : "s"} written
+                  {f.errors.length > 0 && ` — ${f.errors.join("; ")}`}
+                </Notice>
+              ))}
+            </div>
+          )}
+        </div>
 
         {backfillResults && (
           <div className="mt-3 space-y-2">
