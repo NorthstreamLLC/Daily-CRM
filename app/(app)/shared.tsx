@@ -359,7 +359,7 @@ export function PlayerDetail({
           </div>
 
           <div className="sm:col-span-2">
-            <VipTransferToggle player={player} timezone={timezone} />
+            <VipTransferToggle player={player} />
           </div>
 
           {/* Source was read-only for no reason: the server action already
@@ -515,13 +515,7 @@ function AddedDate({ player }: { player: Player }) {
  * Just the words "VIP Transfer". This CRM exists to replace the handover step,
  * not to narrate it - the label names the thing being counted and stops.
  */
-function VipTransferToggle({
-  player,
-  timezone,
-}: {
-  player: Player;
-  timezone: string;
-}) {
+function VipTransferToggle({ player }: { player: Player }) {
   const [on, setOn] = useState(Boolean(player.vip_transferred_at));
   const [when, setWhen] = useState(player.vip_transferred_at ?? null);
   const [pending, start] = useTransition();
