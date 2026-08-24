@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Player } from "@/lib/queries";
@@ -164,7 +165,20 @@ export function TaskRow({
             )}
           </div>
           <p className="mt-0.5 truncate text-caption text-ink-subtle">
-            <span className="tabular">{player.reference}</span>
+            {/* The reference is the way back to the Book.
+                Today is a work queue - it shows what is due and nothing else.
+                Anything that needs the whole record (their history, the other
+                fields, deleting a duplicate) belongs in the Book, and until
+                now the only route there was the search box and retyping a
+                reference you were already looking at. */}
+            <Link
+              href={`/book?q=${encodeURIComponent(player.reference)}`}
+              onClick={(e) => e.stopPropagation()}
+              title={`Open ${player.handle} in your Book`}
+              className="tabular text-accent underline-offset-2 hover:underline"
+            >
+              {player.reference}
+            </Link>
             {player.source && ` · ${player.source}`}
             {due && (
               <span className={cn(veryLate && "font-medium text-danger")}>
