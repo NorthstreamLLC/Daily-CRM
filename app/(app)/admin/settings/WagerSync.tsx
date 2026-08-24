@@ -308,7 +308,10 @@ export function WagerSync({
               cronReady ? "bg-success-soft text-success" : "bg-sunken text-ink-muted"
             )}
           >
-            {cronReady ? "Runs automatically every hour" : "Automatic sync not set up"}
+            {/* The schedule lives in vercel.json. Saying "every hour" here
+                while the cron runs on a half-hour schedule is the kind of
+                small lie that makes somebody debug the wrong thing. */}
+            {cronReady ? "Runs automatically every 30 minutes" : "Automatic sync not set up"}
           </span>
         </div>
 
