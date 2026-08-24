@@ -144,10 +144,14 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
           {/* Shape first, so a glance still works. */}
           <div className="flex h-20 items-end gap-[2px] px-3 pt-3">
             {points.map((p) => (
-              /* A missing period is drawn full height in a warning tint, not
-                 as a flat bar. A flat bar says "nobody wagered"; this says
-                 "we never looked" - and those are opposite conclusions about
-                 whether anything is wrong. */
+              /* A missing period is a full-height EMPTY slot: dashed outline,
+                 almost no fill.
+
+                 Two wrong versions before this one. A flat bar says "nobody
+                 wagered", which is a lie. A filled full-height bar - the first
+                 attempt - reads as a record day, which is a bigger lie in the
+                 other direction. An outlined gap reads as what it is: a space
+                 where a day should be. */
               <span
                 key={p.start}
                 title={
@@ -158,7 +162,7 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
                 className={cn(
                   "flex-1 rounded-t-sm",
                   p.missing
-                    ? "bg-warning/25 outline-dashed outline-1 outline-offset-[-1px] outline-warning/50"
+                    ? "bg-warning/[0.06] outline-dashed outline-1 outline-offset-[-1px] outline-warning/40"
                     : p.start === runningStart
                       ? "bg-accent/30"
                       : "bg-accent/60"
