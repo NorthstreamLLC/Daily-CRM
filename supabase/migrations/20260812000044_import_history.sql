@@ -31,11 +31,10 @@
 --
 --   First Deposit    REAL DATE. first_deposit_at came across too.
 --
---   VIP Transferred  REAL EVENT, ESTIMATED DATE. A player at or past that
---                    stage certainly reached it - but no spreadsheet recorded
---                    when. Dated at the best evidence available: their deposit
---                    if there is one, otherwise last contact, otherwise the day
---                    they were added.
+--   VIP Transferred  RECORDED ONLY. Written for players whose status in the
+--                    spreadsheet literally says VIP Transferred - nothing
+--                    inferred. The date is still an estimate (no sheet
+--                    recorded it), so those rows say so.
 --
 --   Every row gets metadata {"backfilled": true}. That is the point: the
 --   totals become right, the estimated dates stay visibly estimated, and
@@ -43,16 +42,25 @@
 --   observed and which were reconstructed. Quietly inventing timestamps that
 --   look like logged work would be worse than the zero.
 --
--- THE ONE JUDGEMENT CALL - read this before running
---   "At or past VIP Transferred" is taken from the statuses table's own order:
---   VIP Transferred (3) through Reactivation Queue (7). Potential Lead and
---   Dead Lead are off-ramps, not later stages, so they are not counted.
+-- WHY VIP TRANSFERS ARE COUNTED NARROWLY
+--   The first version of this counted anyone at or past VIP Transferred in the
+--   funnel order - which swept in KYC Complete and Active. Both are wrong:
 --
---   That means a player the wager sync moved straight to Active - someone who
---   started wagering without a rep ever transferring them - is credited with a
---   VIP transfer. If that is wrong for how your team works, narrow the list in
---   section 2 to just 'VIP Transferred' before running. Section 1 shows you
---   the difference first.
+--     KYC Complete   a rep can walk somebody through KYC themselves. It says
+--                    nothing about whether the VIP team ever took them.
+--     Active         the wager sync sets this from wagering alone. A player
+--                    who found the site and started betting is Active without
+--                    any rep having transferred anybody.
+--
+--   Isac's read on his own book caught it: "there is no chance Chella even has
+--   10 VIP transfers."
+--
+--   VIP transfers feed commission. A number that decides pay should be
+--   RECORDED, not inferred, and where it has to be wrong it should be wrong
+--   low. Only a status that literally reads VIP Transferred counts here.
+--
+--   Section 1 prints the full status breakdown per rep so this is a decision
+--   made against the actual books rather than an assumption about them.
 -- ============================================================================
 
 
@@ -68,7 +76,7 @@ select
     )
   ) as leads_to_add,
   count(*) filter (
-    where s.sort_order between 3 and 7
+    where p.status = 'VIP Transferred'
       and not exists (
         select 1 from public.activity_log a
          where a.player_id = p.id
@@ -85,13 +93,24 @@ select
            and a.to_status in ('First Deposit', 'Active')
       )
   ) as deposits_to_add,
-  count(*) filter (where p.status = 'VIP Transferred') as vip_right_now,
   count(*) as players
 from public.players p
 join public.users u on u.id = p.owner_id
-left join public.statuses s on s.name = p.status
 group by u.name
 order by u.name;
+
+
+-- 1b. The full picture, so the rule above can be judged rather than trusted.
+--     If a status here should also count as a VIP transfer, add it to the
+--     `in (...)` list in section 2b before running - and only then.
+select
+  u.name as rep,
+  p.status,
+  count(*) as players
+from public.players p
+join public.users u on u.id = p.owner_id
+group by u.name, p.status
+order by u.name, count(*) desc;
 
 
 -- ---------------------------------------------------------------------------
@@ -124,10 +143,9 @@ select
   'VIP Transferred',
   coalesce(p.first_deposit_at, p.last_contact_at, p.assigned_at),
   jsonb_build_object('backfilled', true, 'date_is_estimated', true,
-                     'inferred_from', p.status)
+                     'source', 'status recorded in the imported book')
 from public.players p
-join public.statuses s on s.name = p.status
-where s.sort_order between 3 and 7        -- VIP Transferred .. Reactivation Queue
+where p.status in ('VIP Transferred')     -- recorded only; nothing inferred
   and not exists (
     select 1 from public.activity_log a
      where a.player_id = p.id

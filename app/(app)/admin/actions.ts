@@ -1201,19 +1201,6 @@ async function writeImportHistory(
 
   const supabase = createClient();
 
-  /* "At or past VIP transfer" comes from the statuses table's own ordering
-     rather than a list hard-coded here, so adding a stage to the funnel does
-     not silently leave it out. Potential Lead and Dead Lead sort after the
-     funnel on purpose - they are exits, not later stages. */
-  const { data: statuses } = await supabase
-    .from("statuses")
-    .select("name, sort_order");
-  const order = new Map<string, number>(
-    (statuses ?? []).map((s) => [s.name as string, Number(s.sort_order)])
-  );
-  const vipOrder = order.get("VIP Transferred") ?? 3;
-  const lastFunnelStage = order.get("Reactivation Queue") ?? 7;
-
   const rows: Record<string, unknown>[] = [];
 
   for (const p of created) {
@@ -1226,15 +1213,26 @@ async function writeImportHistory(
       metadata: { backfilled: true, source: "import" },
     });
 
-    const stage = order.get(p.status);
-    if (stage !== undefined && stage >= vipOrder && stage <= lastFunnelStage) {
+    /* ONLY a status that literally reads VIP Transferred.
+
+       This first counted anyone at or past that stage in the funnel order,
+       which swept in KYC Complete - a rep can do KYC themselves - and Active,
+       which the wager sync sets from wagering alone. Both would credit a
+       transfer that never happened, on a number that feeds commission.
+
+       Where this has to be wrong, it is wrong low. */
+    if (p.status === "VIP Transferred") {
       rows.push({
         player_id: p.id,
         user_id: p.owner_id,
         event_type: "status_change",
         to_status: "VIP Transferred",
         occurred_at: p.first_deposit_at ?? p.assigned_at,
-        metadata: { backfilled: true, date_is_estimated: true, inferred_from: p.status },
+        metadata: {
+          backfilled: true,
+          date_is_estimated: true,
+          source: "status recorded in the imported book",
+        },
       });
     }
 
