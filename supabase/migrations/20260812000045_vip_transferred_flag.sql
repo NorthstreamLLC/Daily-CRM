@@ -40,9 +40,9 @@ alter table public.players
    that loads a player throws. Run 046 straight after this one. */
 
 comment on column public.players.vip_transferred_at is
-  'When a rep marked this player as handed to the VIP team. Set by hand, '
-  'never inferred from status - a player at Active may have got there through '
-  'the wager sync without any rep transferring them.';
+  'When a rep marked this player as a VIP Transfer. Set by hand, never '
+  'inferred from status - a player at Active may have got there through the '
+  'wager sync without any rep transferring them.';
 
 /* Partial: the question asked of this column is always "who HAS been
    transferred", and the nulls are the overwhelming majority. */

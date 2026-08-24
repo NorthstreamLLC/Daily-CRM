@@ -448,16 +448,15 @@ export function PlayerDetail({
  * permanent by design, so undoing a mistake has to be explicit.
  */
 /**
- * Did a rep hand this player to the VIP team?
+ * VIP Transfer - ticked by the rep, counted in the stats.
  *
  * A tick box rather than something read off the status, because status cannot
- * answer it. A player sitting at Active may have been transferred by a rep, or
- * may have been moved there by the wager sync for betting on their own - and
- * the difference is somebody's commission.
+ * answer it: a player at Active may have been transferred, or may have been
+ * moved there by the wager sync for betting on their own, and the difference
+ * is somebody's commission.
  *
- * Starts unticked for everyone, including the 1,500 imported players. Reps go
- * back through their own books. That is slower than reconstructing it, and it
- * is the only version that is not a guess.
+ * Just the words "VIP Transfer". This CRM exists to replace the handover step,
+ * not to narrate it - the label names the thing being counted and stops.
  */
 function VipTransferToggle({
   player,
@@ -496,9 +495,7 @@ function VipTransferToggle({
           }}
           className="h-4 w-4 shrink-0 rounded border-line-strong accent-accent"
         />
-        <span className="text-small font-medium text-ink">
-          Transferred to the VIP team
-        </span>
+        <span className="text-small font-medium text-ink">VIP Transfer</span>
         {on && when && (
           <span className="text-caption text-ink-subtle">
             {formatDate(when, timezone)}
@@ -506,10 +503,6 @@ function VipTransferToggle({
         )}
         {pending && <span className="text-caption text-ink-subtle">Saving…</span>}
       </label>
-      <p className="mt-1 pl-[26px] text-caption text-ink-subtle">
-        Counts towards your VIP transfers. Tick it when you actually hand them
-        over - it is not worked out from their status.
-      </p>
       {error && <p className="mt-1 pl-[26px] text-caption text-danger">{error}</p>}
     </div>
   );
