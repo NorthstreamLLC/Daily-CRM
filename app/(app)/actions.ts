@@ -830,6 +830,44 @@ export async function addPlayer(
  * username is looked up from it. Callers who only have a username use
  * setWagererWatch below.
  */
+/**
+ * Mark a player as handed to the VIP team - or take the mark back.
+ *
+ * This exists because the alternative was inferring it, and inference on this
+ * number is not harmless: it feeds commission. Status could not tell a player
+ * a rep transferred from one the wager sync promoted to Active because they
+ * started betting on their own, and every rule I tried produced figures Isac
+ * could see were wrong from across the room.
+ *
+ * So a rep says so. Slower, and the only version that is true.
+ *
+ * The database function moves the column and the activity_log row together -
+ * if the app did those as two writes, a failure between them would leave a
+ * ticked box that no report counted, or a counted transfer with no tick.
+ */
+export async function setVipTransferred(
+  playerId: string,
+  on: boolean
+): Promise<{ error?: string; message?: string }> {
+  const me = await getMe();
+  if (!me) return { error: "Not signed in." };
+
+  const supabase = createClient();
+  const { error } = await supabase.rpc("set_vip_transferred", {
+    p_player: playerId,
+    p_on: on,
+  });
+
+  if (error) return { error: error.message };
+
+  refresh();
+  return {
+    message: on
+      ? "Marked as transferred to the VIP team."
+      : "VIP transfer mark removed.",
+  };
+}
+
 export async function setVipWatch(
   playerId: string,
   watching: boolean,

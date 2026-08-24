@@ -31,10 +31,8 @@
 --
 --   First Deposit    REAL DATE. first_deposit_at came across too.
 --
---   VIP Transferred  RECORDED ONLY. Written for players whose status in the
---                    spreadsheet literally says VIP Transferred - nothing
---                    inferred. The date is still an estimate (no sheet
---                    recorded it), so those rows say so.
+--   VIP Transferred  NOT WRITTEN AT ALL. See section 2b - it becomes a tick
+--                    box on the player instead, recorded from today forward.
 --
 --   Every row gets metadata {"backfilled": true}. That is the point: the
 --   totals become right, the estimated dates stay visibly estimated, and
@@ -42,25 +40,23 @@
 --   observed and which were reconstructed. Quietly inventing timestamps that
 --   look like logged work would be worse than the zero.
 --
--- WHY VIP TRANSFERS ARE COUNTED NARROWLY
---   The first version of this counted anyone at or past VIP Transferred in the
---   funnel order - which swept in KYC Complete and Active. Both are wrong:
+-- WHY VIP TRANSFERS ARE LEFT OUT
+--   The first version counted anyone at or past VIP Transferred in the funnel
+--   ORDER. Isac stopped it: "there is no chance Chella even has 10 VIP
+--   transfers." The funnel order tells you which stage comes later. It does
+--   not tell you which stages a player passed THROUGH, and I had treated the
+--   two as the same thing.
 --
---     KYC Complete   a rep can walk somebody through KYC themselves. It says
---                    nothing about whether the VIP team ever took them.
---     Active         the wager sync sets this from wagering alone. A player
---                    who found the site and started betting is Active without
---                    any rep having transferred anybody.
+--   The killer detail: 'Active' was never a status in any of the spreadsheets.
+--   Yuri's and Tuna's books use Initial Contact, KYC Complete, VIP
+--   Transferred, First Deposit, Potential Lead and Dead Lead. Every Active
+--   player in the database was promoted by the WAGER SYNC on wagering alone,
+--   with no rep involved - so counting them as transfers credits a rep for a
+--   player who found the site by themselves.
 --
---   Isac's read on his own book caught it: "there is no chance Chella even has
---   10 VIP transfers."
---
---   VIP transfers feed commission. A number that decides pay should be
---   RECORDED, not inferred, and where it has to be wrong it should be wrong
---   low. Only a status that literally reads VIP Transferred counts here.
---
---   Section 1 prints the full status breakdown per rep so this is a decision
---   made against the actual books rather than an assumption about them.
+--   Narrowing the rule would have helped, but every version of it is still a
+--   guess dressed as a number, on a figure that decides pay. So the guess is
+--   gone: VIP transfer becomes a tick box (migration 045), recorded from today.
 -- ============================================================================
 
 
@@ -76,7 +72,7 @@ select
     )
   ) as leads_to_add,
   count(*) filter (
-    where p.status = 'VIP Transferred'
+    where p.status in ('VIP Transferred', 'First Deposit')
       and not exists (
         select 1 from public.activity_log a
          where a.player_id = p.id
@@ -101,8 +97,9 @@ order by u.name;
 
 
 -- 1b. The full picture, so the rule above can be judged rather than trusted.
---     If a status here should also count as a VIP transfer, add it to the
---     `in (...)` list in section 2b before running - and only then.
+--     Worth reading before section 2 - in particular, how many players sit at
+--     'Active', since none of the sheets used that status and every one of
+--     them is a wager-sync promotion rather than a rep's work.
 select
   u.name as rep,
   p.status,
@@ -133,26 +130,19 @@ where not exists (
 );
 
 
--- 2b. Reached VIP transfer. The event is certain; the date is the best guess
---     available, and the metadata says so rather than pretending otherwise.
-insert into public.activity_log (player_id, user_id, event_type, to_status, occurred_at, metadata)
-select
-  p.id,
-  p.owner_id,
-  'status_change',
-  'VIP Transferred',
-  coalesce(p.first_deposit_at, p.last_contact_at, p.assigned_at),
-  jsonb_build_object('backfilled', true, 'date_is_estimated', true,
-                     'source', 'status recorded in the imported book')
-from public.players p
-where p.status in ('VIP Transferred')     -- recorded only; nothing inferred
-  and not exists (
-    select 1 from public.activity_log a
-     where a.player_id = p.id
-       and a.event_type = 'status_change'
-       and a.to_status = 'VIP Transferred'
-  );
-
+-- 2b. VIP transfers are NOT backfilled. Deliberately.
+--
+--     There is no honest way to reconstruct them. The sheets recorded a
+--     CURRENT status, not a history, so the only signal is "where are they
+--     now" - and that cannot distinguish a player a rep transferred from one
+--     the wager sync promoted on wagering alone.
+--
+--     Rather than pick a rule and hope, VIP transfer becomes something a rep
+--     TICKS, on the player, from today (migration 045). It starts empty and
+--     fills with facts instead of starting full of guesses.
+--
+--     Historical transfers stay in the spreadsheets, which is where the
+--     evidence for them actually lives.
 
 -- 2c. First deposits. Guarded against the wager sync's own 'Active' events -
 --     the stats count either as a deposit, so inserting both would double

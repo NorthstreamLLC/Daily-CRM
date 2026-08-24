@@ -10,6 +10,7 @@ import {
   changeStatus,
   refreshPlayerWager,
   reverseFirstDeposit,
+  setVipTransferred,
   setVipWatch,
   updatePlayerField,
 } from "./actions";
@@ -356,6 +357,10 @@ export function PlayerDetail({
             />
           </div>
 
+          <div className="sm:col-span-2">
+            <VipTransferToggle player={player} timezone={timezone} />
+          </div>
+
           {/* Source was read-only for no reason: the server action already
               accepted it, the Book already filters on it, and it decides
               whether the open-profile link appears. It was simply never
@@ -442,6 +447,74 @@ export function PlayerDetail({
  * player does not have yet. Reversing a deposit matters because the stamp is
  * permanent by design, so undoing a mistake has to be explicit.
  */
+/**
+ * Did a rep hand this player to the VIP team?
+ *
+ * A tick box rather than something read off the status, because status cannot
+ * answer it. A player sitting at Active may have been transferred by a rep, or
+ * may have been moved there by the wager sync for betting on their own - and
+ * the difference is somebody's commission.
+ *
+ * Starts unticked for everyone, including the 1,500 imported players. Reps go
+ * back through their own books. That is slower than reconstructing it, and it
+ * is the only version that is not a guess.
+ */
+function VipTransferToggle({
+  player,
+  timezone,
+}: {
+  player: Player;
+  timezone: string;
+}) {
+  const [on, setOn] = useState(Boolean(player.vip_transferred_at));
+  const [when, setWhen] = useState(player.vip_transferred_at ?? null);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  return (
+    <div className="rounded-control border border-line bg-surface px-3 py-2">
+      <label className="flex cursor-pointer items-center gap-2.5">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={pending}
+          onChange={(e) => {
+            const next = e.target.checked;
+            setOn(next); // reflect immediately; the server confirms
+            setError(null);
+            start(async () => {
+              const res = await setVipTransferred(player.id, next);
+              if (res?.error) {
+                setOn(!next);
+                setError(res.error);
+              } else {
+                setWhen(next ? new Date().toISOString() : null);
+                router.refresh();
+              }
+            });
+          }}
+          className="h-4 w-4 shrink-0 rounded border-line-strong accent-accent"
+        />
+        <span className="text-small font-medium text-ink">
+          Transferred to the VIP team
+        </span>
+        {on && when && (
+          <span className="text-caption text-ink-subtle">
+            {formatDate(when, timezone)}
+          </span>
+        )}
+        {pending && <span className="text-caption text-ink-subtle">Saving…</span>}
+      </label>
+      <p className="mt-1 pl-[26px] text-caption text-ink-subtle">
+        Counts towards your VIP transfers. Tick it when you actually hand them
+        over - it is not worked out from their status.
+      </p>
+      {error && <p className="mt-1 pl-[26px] text-caption text-danger">{error}</p>}
+    </div>
+  );
+}
+
 /**
  * Where this player came from.
  *

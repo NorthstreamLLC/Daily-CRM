@@ -25,6 +25,8 @@ export type Player = {
   first_deposit_at?: string | null;
   owner_id?: string;
   weighted_wager?: number | null;
+  /** Set by a rep ticking the box - never inferred from status. */
+  vip_transferred_at?: string | null;
 };
 
 export type Me = {
@@ -41,7 +43,8 @@ export type Me = {
 const PLAYER_FIELDS =
   "id, reference, handle, source, roobet_username, status, kyc_status, " +
   "deposit_status, notes, assigned_at, last_contact_at, followup_attempts, " +
-  "next_followup_at, next_action, missing_roobet, is_dead, weighted_wager";
+  "next_followup_at, next_action, missing_roobet, is_dead, weighted_wager, " +
+  "vip_transferred_at";
 
 /**
  * Who is asking.

@@ -47,7 +47,7 @@ const FIELDS =
   "id, reference, handle, source, roobet_username, status, kyc_status, " +
   "deposit_status, notes, assigned_at, last_contact_at, followup_attempts, " +
   "next_followup_at, next_action, missing_roobet, is_dead, is_ftd, " +
-  "first_deposit_at, owner_id, weighted_wager";
+  "first_deposit_at, owner_id, weighted_wager, vip_transferred_at";
 
 /**
  * THE BOOK.

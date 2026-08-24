@@ -1213,28 +1213,16 @@ async function writeImportHistory(
       metadata: { backfilled: true, source: "import" },
     });
 
-    /* ONLY a status that literally reads VIP Transferred.
+    /* NO VIP transfer event. Deliberately.
 
-       This first counted anyone at or past that stage in the funnel order,
-       which swept in KYC Complete - a rep can do KYC themselves - and Active,
-       which the wager sync sets from wagering alone. Both would credit a
-       transfer that never happened, on a number that feeds commission.
+       A spreadsheet records a player's CURRENT status, not their history, so
+       the only thing available to infer a transfer from is where they happen
+       to be now - and that cannot tell a player a rep handed over from one the
+       wager sync moved to Active for betting on their own.
 
-       Where this has to be wrong, it is wrong low. */
-    if (p.status === "VIP Transferred") {
-      rows.push({
-        player_id: p.id,
-        user_id: p.owner_id,
-        event_type: "status_change",
-        to_status: "VIP Transferred",
-        occurred_at: p.first_deposit_at ?? p.assigned_at,
-        metadata: {
-          backfilled: true,
-          date_is_estimated: true,
-          source: "status recorded in the imported book",
-        },
-      });
-    }
+       Two rules were tried here and both produced numbers Isac could see were
+       wrong at a glance. The number feeds commission, so it is now a tick box
+       on the player: reps mark their own, from today. Nothing is invented. */
 
     if (p.first_deposit_at) {
       rows.push({
