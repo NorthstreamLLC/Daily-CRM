@@ -1054,6 +1054,15 @@ export async function runImport(
   let imported = 0;
   let renumbered = 0;
 
+  type CreatedPlayer = {
+    id: string;
+    owner_id: string;
+    status: string;
+    assigned_at: string;
+    first_deposit_at: string | null;
+  };
+  const created: CreatedPlayer[] = [];
+
   async function insertBatch(
     batch: Record<string, unknown>[],
     firstRow: number,
@@ -1061,13 +1070,21 @@ export async function runImport(
   ): Promise<void> {
     if (batch.length === 0) return;
 
-    const { error, count } = await supabase
+    /* The ids come back because the import has to write history too.
+
+       It never did, and that is how 1,500 players ended up with a Stats page
+       reading "Leads added 0" beside a funnel reading 319: the cards count
+       activity_log, the funnel counts players, and only one of the two was
+       ever written by an import. */
+    const { data, error, count } = await supabase
       .from("players")
-      .insert(batch, { count: "exact" });
+      .insert(batch, { count: "exact" })
+      .select("id, owner_id, status, assigned_at, first_deposit_at");
 
     if (!error) {
       imported += count ?? batch.length;
       if (strippedRefs) renumbered += batch.length;
+      created.push(...((data ?? []) as CreatedPlayer[]));
       return;
     }
 
@@ -1107,6 +1124,8 @@ export async function runImport(
     await insertBatch(toInsert.slice(i, i + 500), i + 2, false);
   }
 
+  await writeImportHistory(created);
+
   if (renumbered > 0) {
     rejections.push({
       row: 0,
@@ -1144,6 +1163,100 @@ export async function runImport(
       skipped > 0 ? ` ${skipped.toLocaleString()} skipped — see the report below.` : ""
     }`,
   };
+}
+
+/**
+ * Give imported players the history the app would have written for them.
+ *
+ * Every reported number on the Stats page - leads added, VIP transfers, first
+ * deposits, the 90-day trend, best day, streaks, source performance, KPI
+ * progress - is counted from activity_log. Adding a player through the app
+ * writes a row there. The import wrote straight into `players` and nothing
+ * else, so a rep who arrived with 319 imported players had a Stats page that
+ * said they had done nothing, ever.
+ *
+ * What is written, and how honest each part is:
+ *
+ *   player_created   a real date. assigned_at came from the spreadsheet.
+ *   First Deposit    a real date. first_deposit_at came across too.
+ *   VIP Transferred  a real event on an ESTIMATED date - no sheet recorded
+ *                    when it happened, so it is dated at the deposit, or last
+ *                    contact, or the day they were added, in that order.
+ *
+ * Everything carries metadata.backfilled, and the estimated dates say so
+ * separately. The totals need to be right; the timeline needs to admit which
+ * parts were reconstructed. Writing plausible timestamps with no marker would
+ * make a rep's history unfalsifiable, which is worse than it being sparse.
+ */
+async function writeImportHistory(
+  created: {
+    id: string;
+    owner_id: string;
+    status: string;
+    assigned_at: string;
+    first_deposit_at: string | null;
+  }[]
+): Promise<void> {
+  if (created.length === 0) return;
+
+  const supabase = createClient();
+
+  /* "At or past VIP transfer" comes from the statuses table's own ordering
+     rather than a list hard-coded here, so adding a stage to the funnel does
+     not silently leave it out. Potential Lead and Dead Lead sort after the
+     funnel on purpose - they are exits, not later stages. */
+  const { data: statuses } = await supabase
+    .from("statuses")
+    .select("name, sort_order");
+  const order = new Map<string, number>(
+    (statuses ?? []).map((s) => [s.name as string, Number(s.sort_order)])
+  );
+  const vipOrder = order.get("VIP Transferred") ?? 3;
+  const lastFunnelStage = order.get("Reactivation Queue") ?? 7;
+
+  const rows: Record<string, unknown>[] = [];
+
+  for (const p of created) {
+    rows.push({
+      player_id: p.id,
+      user_id: p.owner_id,
+      event_type: "player_created",
+      to_status: p.status,
+      occurred_at: p.assigned_at,
+      metadata: { backfilled: true, source: "import" },
+    });
+
+    const stage = order.get(p.status);
+    if (stage !== undefined && stage >= vipOrder && stage <= lastFunnelStage) {
+      rows.push({
+        player_id: p.id,
+        user_id: p.owner_id,
+        event_type: "status_change",
+        to_status: "VIP Transferred",
+        occurred_at: p.first_deposit_at ?? p.assigned_at,
+        metadata: { backfilled: true, date_is_estimated: true, inferred_from: p.status },
+      });
+    }
+
+    if (p.first_deposit_at) {
+      rows.push({
+        player_id: p.id,
+        user_id: p.owner_id,
+        event_type: "status_change",
+        to_status: "First Deposit",
+        occurred_at: p.first_deposit_at,
+        metadata: { backfilled: true, source: "import" },
+      });
+    }
+  }
+
+  /* Chunked, and failures are swallowed on purpose: the players are already
+     in. Losing the whole import because a history row would not insert would
+     be trading the thing that matters for the thing that decorates it. The
+     backfill migration can be re-run to fill any gap. */
+  for (let i = 0; i < rows.length; i += 500) {
+    await supabase.from("activity_log").insert(rows.slice(i, i + 500));
+  }
 }
 
 /**
