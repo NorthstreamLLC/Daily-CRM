@@ -376,6 +376,70 @@ export async function sendPasswordReset(
   return { message: `Reset link sent to ${email}.` };
 }
 
+/**
+ * Make a reset link WITHOUT sending an email.
+ *
+ * Supabase's built-in email sender is a shared demo service capped at a few
+ * messages an hour for the whole project. With thirteen reps that cap is not an
+ * edge case, it is Tuesday - "email rate limit exceeded" is what you get the
+ * moment two people need help at once.
+ *
+ * This asks Supabase to GENERATE the recovery link and hand it back rather than
+ * post it. The admin copies it into Discord, where the team already is. No SMTP
+ * to configure, nothing queued, nothing to rate limit.
+ *
+ * The link is a credential - anyone holding it can set that person's password -
+ * so it is returned to the admin who asked for it, never stored, and the audit
+ * row records that one was made without recording the link itself.
+ *
+ * Proper SMTP (Resend, SES, Postmark) is still worth setting up so the ordinary
+ * button works. This is the path that does not depend on it.
+ */
+export async function createResetLink(
+  userId: string,
+  email: string,
+  origin: string
+): Promise<AdminState & { link?: string }> {
+  let me;
+  try {
+    me = await requireAdmin();
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+
+  const admin = createAdminClient();
+  if (!admin) {
+    return { error: "SUPABASE_SERVICE_ROLE_KEY is not set, so links cannot be made." };
+  }
+
+  const site = (process.env.NEXT_PUBLIC_SITE_URL ?? origin).replace(/\/$/, "");
+  if (site.includes("localhost")) {
+    return {
+      error:
+        "The link would point at localhost. Set NEXT_PUBLIC_SITE_URL in Vercel, " +
+        "or do this from the live site.",
+    };
+  }
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo: `${site}/auth/callback?next=/reset-password` },
+  });
+
+  if (error) return { error: error.message };
+
+  const link = data?.properties?.action_link;
+  if (!link) return { error: "Supabase returned no link." };
+
+  /* The link itself is deliberately NOT in the audit row. Recording that a
+     reset was issued is accountability; recording the credential would be a
+     copy of it sitting in a table forever. */
+  await audit(me.id, "reset_link_created", userId, { email });
+
+  return { message: "Link created. It expires in an hour - send it and delete it.", link };
+}
+
 /** Move a whole book to someone else - used before deactivating a leaver. */
 export async function reassignBook(
   fromUserId: string,

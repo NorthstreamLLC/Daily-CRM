@@ -5,7 +5,14 @@ import { useRouter } from "next/navigation";
 import type { TeamMember } from "@/lib/admin";
 import { Badge, Button, Field, Input, Select, Notice, cn } from "@/components/ui";
 import { ChevronDown, Shield } from "@/components/icons";
-import { deleteUser, reassignBook, sendPasswordReset, setTargets, updateUser } from "../actions";
+import {
+  createResetLink,
+  deleteUser,
+  reassignBook,
+  sendPasswordReset,
+  setTargets,
+  updateUser,
+} from "../actions";
 
 /**
  * One person, with everything about them editable in place.
@@ -51,6 +58,12 @@ export function UserRow({
      everywhere. */
   const [confirmDelete, setConfirmDelete] = useState(false);
   const router = useRouter();
+
+  /* Held in state rather than shown through the usual banner: it is a
+     credential, so it gets its own box you can copy from and dismiss. */
+  const [resetLink, setResetLink] = useState<string | null>(null);
+  const [linkPending, setLinkPending] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   function run(
     fn: () => Promise<{ error?: string; message?: string; warning?: string } | null>
@@ -245,6 +258,65 @@ export function UserRow({
               >
                 Send password reset
               </Button>
+
+              {/* The path that does not touch email at all.
+
+                  Supabase's built-in sender allows a couple of messages an
+                  hour for the whole project, so "email rate limit exceeded"
+                  arrives the moment two people need help at once. This makes
+                  the same link and hands it over to paste into Discord. */}
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={linkPending}
+                onClick={async () => {
+                  setLinkPending(true);
+                  setLinkError(null);
+                  setResetLink(null);
+                  const res = await createResetLink(
+                    user.id,
+                    user.email,
+                    window.location.origin
+                  );
+                  if (res?.error) setLinkError(res.error);
+                  else setResetLink(res?.link ?? null);
+                  setLinkPending(false);
+                }}
+              >
+                Copy a reset link instead
+              </Button>
+
+              {linkError && (
+                <div className="w-full">
+                  <Notice tone="danger">{linkError}</Notice>
+                </div>
+              )}
+
+              {resetLink && (
+                <div className="w-full rounded-control border border-line-strong bg-sunken p-2">
+                  <p className="mb-1 text-caption text-ink-muted">
+                    Send this to {user.name} privately. It expires in an hour and
+                    lets whoever holds it set their password.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={resetLink}
+                      onFocus={(e) => e.currentTarget.select()}
+                      className="font-mono text-caption"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => navigator.clipboard?.writeText(resetLink)}
+                    >
+                      Copy
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setResetLink(null)}>
+                      Done
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {!isMe && (
                 <Button
