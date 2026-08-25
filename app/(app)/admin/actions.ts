@@ -345,10 +345,30 @@ export async function sendPasswordReset(
     return { error: (e as Error).message };
   }
 
+  /* The configured site first, the caller's tab only as a fallback.
+
+     This used to trust `origin` alone, which is wherever the ADMIN happened to
+     be when they clicked. Send a reset from a localhost tab and the rep gets a
+     link to localhost:3000 - which is exactly what happened to Yuri, and looks
+     to them like the reset is broken rather than pointed at the wrong machine.
+
+     Set NEXT_PUBLIC_SITE_URL in Vercel to the production URL. Supabase must
+     also list that callback under Authentication > URL Configuration >
+     Redirect URLs, or it ignores this and falls back to its own Site URL. */
+  const site = (process.env.NEXT_PUBLIC_SITE_URL ?? origin).replace(/\/$/, "");
+
   const supabase = createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/callback?next=/reset-password`,
+    redirectTo: `${site}/auth/callback?next=/reset-password`,
   });
+
+  if (site.includes("localhost")) {
+    return {
+      error:
+        "The reset link would point at localhost. Set NEXT_PUBLIC_SITE_URL in " +
+        "Vercel, or send this from the live site rather than a local tab.",
+    };
+  }
 
   if (error) return { error: error.message };
 
