@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { WagerHistory, HistoryGrain } from "@/lib/admin";
 import { cn } from "@/components/ui";
-import { ArrowDown, ArrowUp } from "@/components/icons";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from "@/components/icons";
 
 const GRAINS: { key: HistoryGrain; label: string }[] = [
   { key: "day", label: "By day" },
@@ -35,6 +35,11 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
 
   const points = history[grain];
 
+  /* Changing grain or sort must reset the page. Otherwise switching from
+     By day to By month leaves you on page 3 of a two-page table, which renders
+     empty and reads as "no data". */
+  useEffect(() => setPage(1), [grain, sort, desc]);
+
   const rows = useMemo(() => {
     const withAvg = points.map((p) => ({
       ...p,
@@ -50,6 +55,16 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
   /* Gaps are counted, not just drawn. "8 days" next to "5 days never
      captured" is the difference between a quiet fortnight and a broken sync,
      and the header is where somebody would actually notice. */
+  /* Seven rows - a week at a glance, and small enough that the table stops
+     eating half the page. The chart above still draws every period, so the
+     shape of a month is not lost by making the table readable. */
+  const PER_PAGE = 7;
+  const [page, setPage] = useState(1);
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+  const current = Math.min(page, pageCount);
+  const visible = rows.slice((current - 1) * PER_PAGE, current * PER_PAGE);
+
   const gaps = points.filter((p) => p.missing).length;
   const captured = points.length - gaps;
 
@@ -200,7 +215,7 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
+                {visible.map((r, i) => (
                   <tr
                     key={r.start}
                     className={cn(
@@ -244,6 +259,42 @@ export function WagerTrend({ history }: { history: WagerHistory }) {
               </tbody>
             </table>
           </div>
+
+          {pageCount > 1 && (
+            <div className="flex items-center justify-between border-t border-line px-4 py-2">
+              <span className="text-caption text-ink-subtle">
+                {(current - 1) * PER_PAGE + 1}–
+                {Math.min(current * PER_PAGE, rows.length)} of {rows.length}{" "}
+                {grain}
+                {rows.length === 1 ? "" : "s"}
+              </span>
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage(current - 1)}
+                  disabled={current === 1}
+                  aria-label="Previous page"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-control
+                             text-ink-muted hover:bg-sunken hover:text-ink disabled:opacity-30"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="tabular px-1 text-caption text-ink-muted">
+                  {current} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage(current + 1)}
+                  disabled={current === pageCount}
+                  aria-label="Next page"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-control
+                             text-ink-muted hover:bg-sunken hover:text-ink disabled:opacity-30"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </span>
+            </div>
+          )}
         </>
       )}
     </div>

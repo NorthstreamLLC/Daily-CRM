@@ -141,6 +141,7 @@ export function WagererTable({
                 <Th className="w-10">#</Th>
                 <Th>Roobet username</Th>
                 <Th>Player</Th>
+                <Th>Code</Th>
                 <Th>Rep</Th>
                 <Th>Status</Th>
                 <Th align="right">{periodLabel}</Th>
@@ -183,6 +184,15 @@ export function WagererTable({
                       </span>
                     )}
                   </td>
+                  {/* Which code they wagered under. Present on the other two
+                      wager tables and dropped from this one when it gained
+                      search and paging - a column quietly lost in a rebuild,
+                      which is the easiest kind to lose and the hardest to
+                      notice. */}
+                  <td className="px-4 py-2 text-small text-ink-subtle">
+                    {r.sources || "—"}
+                  </td>
+
                   {/* An unclaimed row is a statement of fact, not a task.
                       Assigning happens in the Book, so this says so plainly
                       rather than looking like a link that does nothing. */}

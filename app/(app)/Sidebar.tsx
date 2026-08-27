@@ -15,13 +15,14 @@ import {
   LogOut,
   Menu,
   Shield,
+  History,
   X,
 } from "@/components/icons";
 
 export type NavItem = {
   href: string;
   label: string;
-  icon: "today" | "calendar" | "book" | "stats" | "admin";
+  icon: "today" | "calendar" | "book" | "stats" | "activity" | "admin";
 };
 
 const ICONS = {
@@ -29,6 +30,7 @@ const ICONS = {
   calendar: Calendar,
   book: BookOpen,
   stats: BarChart,
+  activity: History,
   admin: Shield,
 } as const;
 

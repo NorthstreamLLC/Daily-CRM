@@ -114,6 +114,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/calendar", label: "Calendar", icon: "calendar" },
     { href: "/book", label: "Book", icon: "book" },
     { href: "/stats", label: "Stats", icon: "stats" },
+    /* Everyone, not admins only. The database scopes it - an admin sees the
+       team, a rep sees themselves - so a rep who thinks a figure is wrong can
+       point at the day rather than just disagreeing with it. */
+    { href: "/activity", label: "Activity", icon: "activity" },
     ...(me.role === "admin"
       ? [{ href: "/admin", label: "Admin", icon: "admin" as const }]
       : []),

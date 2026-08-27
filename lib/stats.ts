@@ -489,3 +489,55 @@ export async function getLeaderboard(
 
   return rows.sort((a, b) => b.ftd - a.ftd || b.vip - a.vip || b.leads - a.leads);
 }
+
+/* ------------------------------------------------------------ Activity feed */
+
+export type ActivityDay = {
+  day: string;
+  userId: string;
+  userName: string;
+  leads: number;
+  contacts: number;
+  vipTransfers: number;
+  deposits: number;
+  notes: number;
+  total: number;
+};
+
+/**
+ * WHO LOGGED WHAT, PER DAY.
+ *
+ * Counted in the database (activity_by_day), not by fetching rows and tallying
+ * them here. Thirteen reps produce hundreds of events a day, and counting a
+ * truncated fetch is precisely how the leaderboard came to report "Clear" for
+ * a rep with 176 people waiting.
+ *
+ * Scoping is RLS's job, not a parameter. The function is security invoker, so
+ * an admin gets the team and a rep gets themselves without this code having to
+ * remember which - the mistake that showed every rep the company's funnel was
+ * exactly a scope re-derived in the app instead of asked of the database.
+ */
+export async function getActivityByDay(
+  days: number,
+  ownerId?: string
+): Promise<ActivityDay[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("activity_by_day", {
+    p_days: days,
+    p_owner: ownerId ?? null,
+  });
+
+  if (error) throw error;
+
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    day: String(r.day).slice(0, 10),
+    userId: r.user_id as string,
+    userName: (r.user_name as string) ?? "—",
+    leads: Number(r.leads),
+    contacts: Number(r.contacts),
+    vipTransfers: Number(r.vip_transfers),
+    deposits: Number(r.deposits),
+    notes: Number(r.notes),
+    total: Number(r.total),
+  }));
+}

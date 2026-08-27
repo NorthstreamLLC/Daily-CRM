@@ -48,6 +48,11 @@ function columnsFor(showWager: boolean): Column[] {
           },
         ] as Column[])
       : []),
+    /* When they came into the book. Asked for by a manager who wanted it
+       visible at a glance rather than one player at a time in the panel -
+       "which of these did you add last week" is a question about a list, and
+       answering it by opening 300 detail panels is not answering it. */
+    { key: "assigned_at", label: "Added", align: "right", className: "w-[104px]" },
     { key: "last_contact_at", label: "Last contact", align: "right", className: "w-[112px]" },
     { key: "next_followup_at", label: "Due", align: "right", className: "w-[112px]" },
   ];
@@ -513,6 +518,10 @@ export function BookTable({
                     )}
 
                     <td className="tabular px-3 py-1.5 text-right align-middle text-small text-ink-muted">
+                      {formatDate(p.assigned_at, timezone)}
+                    </td>
+
+                    <td className="tabular px-3 py-1.5 text-right align-middle text-small text-ink-muted">
                       {formatDate(p.last_contact_at, timezone)}
                     </td>
 
@@ -591,7 +600,8 @@ export function BookTable({
                   </div>
                   <p className="mt-0.5 text-caption text-ink-subtle">
                     {p.roobet_username ?? "No Roobet username"}
-                    {p.source && ` · ${p.source}`} · Last contact{" "}
+                    {p.source && ` · ${p.source}`} · Added{" "}
+                    {formatDate(p.assigned_at, timezone)} · Last contact{" "}
                     {formatDate(p.last_contact_at, timezone)}
                   </p>
                   <div className="mt-2 flex items-center gap-2">
