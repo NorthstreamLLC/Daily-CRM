@@ -116,6 +116,14 @@ export default async function BookPage({
       tone: "warning",
     },
     { key: "ftd", label: "Deposited", count: counts.ftd, tone: "success" },
+    /* Transferred and never deposited - the warmest names nobody is working.
+       Deliberately not toned as a warning: this is a queue, not a fault. */
+    {
+      key: "transferred_no_deposit",
+      label: "To retarget",
+      count: counts.toRetarget,
+      tone: "success",
+    },
     { key: "dead", label: "Dead leads", count: counts.dead },
   ];
 

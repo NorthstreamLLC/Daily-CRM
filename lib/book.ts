@@ -18,7 +18,7 @@ export type BookFilters = {
   q: string;
   status: string;      // "" means any
   source: string;      // "" means any
-  flag: string;        // "", "missing_roobet", "overdue", "ftd", "dead"
+  flag: string;        // "", "missing_roobet", "overdue", "ftd", "dead", "transferred_no_deposit"
   sort: BookSort;
   dir: "asc" | "desc";
   page: number;        // 1-based
@@ -87,6 +87,22 @@ export async function getBook(
   if (filters.flag === "missing_roobet") query = query.eq("missing_roobet", true);
   if (filters.flag === "dead") query = query.eq("is_dead", true);
   if (filters.flag === "ftd") query = query.not("first_deposit_at", "is", null);
+
+  /* THE RETARGETING POOL.
+
+     Handed to the VIP team and never deposited. Not a failure - a transfer is
+     where the rep's part ends, and whether that player deposits is somebody
+     else's conversation. But they are the warmest names in the book: already
+     interested enough to be transferred, and no longer anybody's daily task.
+
+     Counted nowhere and listed nowhere until now. The Stats funnel said "11 of
+     these VIP transfers never deposited" and stopped, which turns work into a
+     statistic. */
+  if (filters.flag === "transferred_no_deposit") {
+    query = query
+      .not("vip_transferred_at", "is", null)
+      .is("first_deposit_at", null);
+  }
   if (filters.flag === "overdue") {
     query = query.lte("next_followup_at", new Date().toISOString());
   }
@@ -118,11 +134,12 @@ export async function getBookCounts(me: Me, ownerId?: string) {
       .select("id", { count: "exact", head: true })
       .eq("owner_id", owner);
 
-  const [all, missing, dead, ftd, overdue] = await Promise.all([
+  const [all, missing, dead, ftd, toRetarget, overdue] = await Promise.all([
     base(),
     base().eq("missing_roobet", true),
     base().eq("is_dead", true),
     base().not("first_deposit_at", "is", null),
+    base().not("vip_transferred_at", "is", null).is("first_deposit_at", null),
     base().lte("next_followup_at", new Date().toISOString()),
   ]);
 
@@ -131,6 +148,7 @@ export async function getBookCounts(me: Me, ownerId?: string) {
     missingRoobet: missing.count ?? 0,
     dead: dead.count ?? 0,
     ftd: ftd.count ?? 0,
+    toRetarget: toRetarget.count ?? 0,
     overdue: overdue.count ?? 0,
   };
 }
