@@ -219,13 +219,25 @@ export async function changeStatus(
   const { error } = await supabase.from("players").update(patch).eq("id", playerId);
   if (error) return { error: error.message };
 
-  await supabase.from("activity_log").insert({
+  /* A milestone happens once per player, and the database now enforces that
+     (migration 053). Moving a status back and forth used to write a second
+     event each time - Chella was counted for 24 VIP transfers across 13
+     players before anyone noticed, on the figure commission is paid from.
+
+     So a rejected duplicate is the constraint doing its job, not a failure.
+     The status change itself has already been saved; only the second copy of
+     the event is refused. */
+  const { error: logError } = await supabase.from("activity_log").insert({
     player_id: playerId,
     user_id: me.id,
     event_type: "status_change",
     from_status: player.status,
     to_status: newStatus,
   });
+
+  if (logError && !/duplicate key|unique constraint/i.test(logError.message)) {
+    return { error: logError.message };
+  }
 
   refresh();
   return { message: "Status updated." };
