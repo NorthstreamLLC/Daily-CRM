@@ -797,6 +797,9 @@ export async function addPlayer(
       // task and appear in the queue tomorrow morning with a tick.
       last_contact_at: contacted ? now : null,
       vip_fasttrack_started_at: status === "VIP Transferred" ? now : null,
+      /* Adding somebody straight in at VIP Transferred IS a transfer. Without
+         this the box beside them stays empty and their stat reads zero. */
+      vip_transferred_at: status === "VIP Transferred" ? now : null,
       first_deposit_at:
         status === "First Deposit" || status === "Active" ? now : null,
     })
@@ -805,12 +808,36 @@ export async function addPlayer(
 
   if (error) return { error: error.message };
 
-  await supabase.from("activity_log").insert({
-    player_id: created.id,
-    user_id: me.id,
-    event_type: "player_created",
-    to_status: status,
-  });
+  /* player_created, AND the milestone if they were added already at one.
+     
+     A rep who adds someone straight in at VIP Transferred or First Deposit has
+     done that thing - but the stats count milestones from status_change rows,
+     and creating a player only ever wrote player_created. So the work happened,
+     the funnel showed it, and the rep's VIP and deposit figures stayed at zero
+     with nothing explaining why.
+     
+     Same shape as the import writing players and no history: a second way in
+     that skipped the record everything is counted from. */
+  const events: Record<string, unknown>[] = [
+    {
+      player_id: created.id,
+      user_id: me.id,
+      event_type: "player_created",
+      to_status: status,
+    },
+  ];
+
+  if (status === "VIP Transferred" || status === "First Deposit" || status === "Active") {
+    events.push({
+      player_id: created.id,
+      user_id: me.id,
+      event_type: "status_change",
+      to_status: status,
+      metadata: { at_creation: true },
+    });
+  }
+
+  await supabase.from("activity_log").insert(events);
 
   refresh();
 
@@ -1209,6 +1236,9 @@ export async function bulkAddPlayers(
       assigned_at: now,
       last_contact_at: contacted ? now : null,
       vip_fasttrack_started_at: status === "VIP Transferred" ? now : null,
+      /* Adding somebody straight in at VIP Transferred IS a transfer. Without
+         this the box beside them stays empty and their stat reads zero. */
+      vip_transferred_at: status === "VIP Transferred" ? now : null,
       first_deposit_at: status === "First Deposit" || status === "Active" ? now : null,
     });
   }
