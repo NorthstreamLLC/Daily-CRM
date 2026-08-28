@@ -180,7 +180,7 @@ export function ActivityTable({
                   leads
                   <span className="mx-1.5 text-ink-subtle">·</span>
                   <span className="tabular font-medium text-ink">{d.contacts}</span>{" "}
-                  contacts
+                  daily tasks
                   <span className="mx-1.5 text-ink-subtle">·</span>
                   <span className="tabular font-medium text-ink">{d.vip}</span> VIP
                   <span className="mx-1.5 text-ink-subtle">·</span>
@@ -193,11 +193,14 @@ export function ActivityTable({
                 <thead>
                   <tr className="border-b border-line">
                     <Th>Rep</Th>
-                    {/* Named so the difference is readable without asking.
-                        A lead is a new person; a contact is a touch, and the
-                        same person can be contacted every week for a year. */}
+                    {/* The team's own words. Ticking a row on Today IS
+                        completing a daily task, so calling it a "contact"
+                        here made people translate between the page they work
+                        on and the page they are measured by. A lead is a new
+                        person; a daily task is one tick, and the same person
+                        can be worked every week for a year. */}
                     <Th align="right">New leads</Th>
-                    <Th align="right">Contacts made</Th>
+                    <Th align="right">Daily tasks</Th>
                     <Th align="right">VIP transfers</Th>
                     <Th align="right">Deposits</Th>
                   </tr>

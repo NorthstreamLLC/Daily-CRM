@@ -310,9 +310,9 @@ export default async function StatsPage({
             icon={<Wallet size={14} />}
           />
           <Metric
-            label="Contacts logged"
+            label="Daily tasks done"
             value={activity.touches.toLocaleString()}
-            sub="Tasks ticked off"
+            sub="Ticked off on Today"
             icon={<Target size={14} />}
           />
         </div>
