@@ -179,7 +179,7 @@ export async function changeStatus(
 
   const { data: player } = await supabase
     .from("players")
-    .select("id, status, first_deposit_at, vip_fasttrack_started_at")
+    .select("id, status, first_deposit_at, vip_fasttrack_started_at, vip_transferred_at")
     .eq("id", playerId)
     .single();
 
@@ -188,9 +188,25 @@ export async function changeStatus(
 
   const patch: Record<string, unknown> = { status: newStatus };
 
-  if (newStatus === "VIP Transferred" && !player.vip_fasttrack_started_at) {
-    patch.vip_fasttrack_started_at = new Date().toISOString();
-    patch.vip_fasttrack_checkins = 0;
+  if (newStatus === "VIP Transferred") {
+    if (!player.vip_fasttrack_started_at) {
+      patch.vip_fasttrack_started_at = new Date().toISOString();
+      patch.vip_fasttrack_checkins = 0;
+    }
+
+    /* Tick the box too.
+
+       There are two ways to say "VIP transfer" - this dropdown and the tick
+       box on the player - and until now only the tick box set the flag. So a
+       rep who moved the status saw the event counted on Stats while the
+       checkbox beside it stayed empty, and the player page disagreed with the
+       stats page about the same fact.
+
+       coalesce, not overwrite: if they were already ticked with a corrected
+       date, moving the status must not quietly stamp it to today. */
+    if (!player.vip_transferred_at) {
+      patch.vip_transferred_at = new Date().toISOString();
+    }
   }
 
   if (
@@ -347,7 +363,7 @@ export async function bulkChangeStatus(
 
   const { data: players } = await supabase
     .from("players")
-    .select("id, status, first_deposit_at, vip_fasttrack_started_at")
+    .select("id, status, first_deposit_at, vip_fasttrack_started_at, vip_transferred_at")
     .in("id", playerIds);
 
   const changing = (players ?? []).filter((p) => p.status !== newStatus);
