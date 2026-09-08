@@ -150,6 +150,34 @@ export function TaskRow({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <CopyHandle handle={player.handle} />
             <OpenProfile handle={player.handle} source={player.source} />
+
+            {/* THE ROOBET USERNAME, on the front of the row.
+
+                Reps know their players by Roobet username - that is the name
+                on the leaderboard, in the affiliate panel, in every
+                conversation about money. The handle is a Discord or Twitter
+                name they may never have read.
+
+                So the queue was showing the one identifier a rep does not
+                recognise: "who is this guy", then a search in the Book to find
+                out. Both are here now, coloured differently so which is which
+                is obvious without a label on all three hundred rows.
+
+                Copyable for the same reason the handle is - it gets pasted
+                into Roobet's panel constantly. */}
+            {player.roobet_username?.trim() && (
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <span className="text-ink-subtle" aria-hidden="true">
+                  ·
+                </span>
+                <CopyHandle
+                  handle={player.roobet_username}
+                  tone="accent"
+                  label={`Copy the Roobet username ${player.roobet_username}`}
+                />
+              </span>
+            )}
+
             {addedToday && <Badge tone="accent">Added today</Badge>}
             {player.missing_roobet && (
               <Badge tone="warning">No username</Badge>

@@ -557,9 +557,54 @@ export async function updateSetting(key: string, value: string): Promise<AdminSt
     }
   }
 
-  const { error } = await supabase.from("settings").update({ value: trimmed }).eq("key", key);
+  /* SERVICE ROLE for the write, after requireAdmin() above.
+
+     This toggle never worked. Six attempts on "Show wager figures to reps"
+     wrote six audit rows and left the value at 'false' every time, because the
+     update matched zero rows - and a zero-row update is not an error in
+     PostgREST. It succeeds, changes nothing, and the old code answered
+     "Saved."
+
+     WHAT IS KNOWN: the SELECT above found the row (or this would have returned
+     "No such setting"), and the UPDATE on the same key changed nothing. Reads
+     are allowed to everyone by settings_select; writes need settings_admin,
+     which calls is_admin(). So the write was refused where the read was not.
+
+     WHAT IS NOT PROVEN: exactly why. The obvious theory - that is_admin()
+     returns false because auth.uid() is NULL, since getMe() trusts the
+     middleware's x-verified-user header rather than a live session - does not
+     survive contact with the evidence: creating a user inserts into `users`
+     under the same kind of policy and works. An INSERT that violates RLS
+     errors; an UPDATE just matches nothing. That asymmetry is why this one
+     was silent and the other was not, but it does not explain the refusal.
+
+     The fix does not depend on knowing. Using the service role removes the
+     second opinion entirely - the permission question is answered once, in
+     requireAdmin() above, by the same code that gates every other admin
+     action. Guessing at a cause and fixing that has been wrong three times
+     today; removing the disagreement is not a guess.
+
+     Counted anyway. If this ever writes nothing again the cause will be
+     something else, and it should say so rather than claim success. */
+  const admin = createAdminClient();
+  if (!admin) {
+    return { error: "SUPABASE_SERVICE_ROLE_KEY is not set, so settings cannot be saved." };
+  }
+
+  const { error, count } = await admin
+    .from("settings")
+    .update({ value: trimmed }, { count: "exact" })
+    .eq("key", key);
+
   if (error) return { error: error.message };
 
+  if (!count) {
+    return { error: `${setting.label} did not save - no setting called "${key}".` };
+  }
+
+  /* Audited only once it actually changed. Six rows recording a change that
+     never happened is a log that lies, and a log that lies is worse than none:
+     it is the thing you check when the numbers are questioned. */
   await audit(me.id, "update_setting", null, { key, value: trimmed });
   refresh();
   return { message: "Saved." };

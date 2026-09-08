@@ -22,9 +22,18 @@ import { Check, ExternalLink } from "@/components/icons";
 export function CopyHandle({
   handle,
   className,
+  tone = "default",
+  label,
 }: {
   handle: string;
   className?: string;
+  /* Two different names sit side by side on a queue row - the social handle
+     and the Roobet username - and a rep needs to tell them apart at a glance
+     rather than by reading. Colour does that; a label on every one of 300 rows
+     would just be noise. */
+  tone?: "default" | "accent";
+  /** Overrides the tooltip, so "Copy the Roobet username" can say so. */
+  label?: string;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -45,15 +54,22 @@ export function CopyHandle({
     <button
       type="button"
       onClick={copy}
-      title={`Copy ${handle}`}
-      aria-label={`Copy ${handle} to clipboard`}
+      title={label ?? `Copy ${handle}`}
+      aria-label={label ?? `Copy ${handle} to clipboard`}
       className={cn(
         "group inline-flex max-w-full items-center gap-1 rounded px-1 -mx-1",
         "text-left transition-colors duration-fast hover:bg-accent-soft",
         className
       )}
     >
-      <span className="truncate font-medium text-ink">{handle}</span>
+      <span
+        className={cn(
+          "truncate font-medium",
+          tone === "accent" ? "text-accent" : "text-ink"
+        )}
+      >
+        {handle}
+      </span>
       {copied ? (
         <Check size={12} className="shrink-0 text-success" />
       ) : (
