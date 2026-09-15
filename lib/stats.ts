@@ -259,6 +259,86 @@ export async function getTrend(
   return Array.from(byDay.values());
 }
 
+/* -------------------------------------------------- This month's deposits */
+
+export type MonthDeposit = {
+  playerId: string;
+  reference: string | null;
+  handle: string;
+  roobetUsername: string | null;
+  status: string;
+  /** ISO timestamp of the FIRST deposit-ish event, not the latest. */
+  depositedAt: string;
+};
+
+/**
+ * WHO DEPOSITED THIS MONTH, by name.
+ *
+ * The card says 14; this says which 14. A number on its own cannot be acted
+ * on or checked - it was a count of fourteen people nobody could look at, and
+ * the only way to find them was to sort the Book by a date column that does
+ * not exist.
+ *
+ * Counted from activity_log rather than players.first_deposit_at, and
+ * deliberately so: the card counts events in the log, and a list built from a
+ * different source would sooner or later disagree with the number directly
+ * above it. That mismatch is what started this whole thread - a card reading 6
+ * over a table showing 3.
+ *
+ * Deduplicated by player, keeping the EARLIEST event. A rep marking someone
+ * First Deposit and the sync later marking them Active is one deposit, and the
+ * date that matters is the first one.
+ */
+export async function getMonthDeposits(
+  userId: string,
+  timeZone: string
+): Promise<MonthDeposit[]> {
+  const supabase = createClient();
+
+  /* 40 days back, then filtered to the calendar month in the viewer's zone.
+     A date boundary computed in SQL would have to reproduce the timezone
+     arithmetic that ymdInZone already does correctly; a slightly wide window
+     and one comparison in JS cannot drift from it. */
+  const since = startOfDayPlusUtc(timeZone, -40).toISOString();
+  const thisMonth = ymdInZone(new Date(), timeZone).slice(0, 7);
+
+  const { data } = await supabase
+    .from("activity_log")
+    .select("player_id, to_status, occurred_at")
+    .eq("user_id", userId)
+    .eq("event_type", "status_change")
+    .in("to_status", ["First Deposit", "Active"])
+    .not("player_id", "is", null)
+    .gte("occurred_at", since)
+    .order("occurred_at", { ascending: true })
+    .limit(5000);
+
+  const earliest = new Map<string, string>();
+  for (const e of data ?? []) {
+    const id = e.player_id as string;
+    if (ymdInZone(new Date(e.occurred_at), timeZone).slice(0, 7) !== thisMonth) continue;
+    if (!earliest.has(id)) earliest.set(id, e.occurred_at as string);
+  }
+
+  if (earliest.size === 0) return [];
+
+  const { data: players } = await supabase
+    .from("players")
+    .select("id, reference, handle, roobet_username, status")
+    .in("id", Array.from(earliest.keys()));
+
+  return (players ?? [])
+    .map((p) => ({
+      playerId: p.id as string,
+      reference: p.reference as string | null,
+      handle: p.handle as string,
+      roobetUsername: (p.roobet_username as string | null)?.trim() || null,
+      status: p.status as string,
+      depositedAt: earliest.get(p.id as string)!,
+    }))
+    .sort((a, b) => b.depositedAt.localeCompare(a.depositedAt));
+}
+
 /* ----------------------------------------------------------------- Records */
 
 export type Records = {
