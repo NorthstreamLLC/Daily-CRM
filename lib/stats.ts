@@ -81,7 +81,7 @@ export async function getActivity(
 
   let query = supabase
     .from("activity_log")
-    .select("event_type, to_status")
+    .select("event_type, to_status, player_id")
     .eq("user_id", userId)
     /* Only work on players who still exist.
 
@@ -101,22 +101,55 @@ export async function getActivity(
   return tally(data ?? []);
 }
 
-type Event = { event_type: string; to_status: string | null };
+type Event = {
+  event_type: string;
+  to_status: string | null;
+  player_id: string | null;
+};
 
+/**
+ * MILESTONES ARE COUNTED PER PLAYER, NOT PER EVENT.
+ *
+ * This used to add one for every qualifying row, and the normal life of a
+ * depositing player produces TWO of them:
+ *
+ *   rep marks them First Deposit      -> status_change to 'First Deposit'
+ *   the wager sync sees them playing  -> status_change to 'Active'
+ *
+ * Both count as a deposit, so that player was worth two. Migration 053's
+ * unique index does not stop it - it allows one row per (player, to_status),
+ * and these are two different statuses. Plat reading 43 deposits against 46
+ * players is what that looks like from the outside.
+ *
+ * A first deposit happens once per person by definition, so it is counted
+ * once per person. A reversal removes the player rather than subtracting one,
+ * which also fixes the case where a correction landed in the window but the
+ * deposit it corrects did not - that used to push the total negative and get
+ * clamped to zero, quietly losing everyone else's deposits with it.
+ */
 function tally(rows: Event[]): ActivityTotals {
-  const totals = { leads: 0, vip: 0, ftd: 0, touches: 0 };
+  let leads = 0;
+  let touches = 0;
+  const depositors = new Set<string>();
+  const transferred = new Set<string>();
+  const reversed = new Set<string>();
+
   for (const e of rows) {
-    if (e.event_type === "player_created") totals.leads += 1;
-    else if (e.event_type === "task_completed") totals.touches += 1;
-    // A deposit logged by mistake and corrected stops counting.
-    else if (e.event_type === "deposit_reversed") totals.ftd -= 1;
-    else if (e.event_type === "status_change") {
-      if (e.to_status === "VIP Transferred") totals.vip += 1;
-      if (e.to_status === "First Deposit" || e.to_status === "Active") totals.ftd += 1;
+    if (e.event_type === "player_created") leads += 1;
+    else if (e.event_type === "task_completed") touches += 1;
+    else if (e.event_type === "deposit_reversed") {
+      if (e.player_id) reversed.add(e.player_id);
+    } else if (e.event_type === "status_change" && e.player_id) {
+      if (e.to_status === "VIP Transferred") transferred.add(e.player_id);
+      if (e.to_status === "First Deposit" || e.to_status === "Active") {
+        depositors.add(e.player_id);
+      }
     }
   }
-  totals.ftd = Math.max(0, totals.ftd);
-  return totals;
+
+  for (const id of Array.from(reversed)) depositors.delete(id);
+
+  return { leads, vip: transferred.size, ftd: depositors.size, touches };
 }
 
 /* ------------------------------------------------------- Source performance */
@@ -237,6 +270,10 @@ export type Records = {
   totalLeads: number;
   totalVip: number;
   totalFtds: number;
+  /** First deposits in the current calendar month, whatever window is picked. */
+  ftdsThisMonth: number;
+  /** VIP transfers in the same month, for the same reason. */
+  vipThisMonth: number;
 };
 
 const MONTHS = [
@@ -259,7 +296,7 @@ export async function getRecords(
 
   const { data } = await supabase
     .from("activity_log")
-    .select("event_type, to_status, occurred_at")
+    .select("event_type, to_status, occurred_at, player_id")
     .eq("user_id", userId)
     // Deleted players stop counting - see getActivity.
     .not("player_id", "is", null)
@@ -273,17 +310,44 @@ export async function getRecords(
   const leadsByWeek = new Map<string, number>();
 
   let totalLeads = 0;
-  let totalVip = 0;
-  let totalFtds = 0;
+
+  /* Per player, not per event - the same correction as tally() above, and for
+     the same reason: a rep marking someone First Deposit and the wager sync
+     later marking them Active is one deposit written down twice. These two
+     figures feed the "all time" line under the cards, so they have to agree
+     with the cards or the page argues with itself. */
+  const depositors = new Set<string>();
+  const transferred = new Set<string>();
+  const depositorsThisMonth = new Set<string>();
+  const transferredThisMonth = new Set<string>();
+
+  /* The calendar month, in the viewer's zone, held separately from the range
+     picker. "How many deposits this month" is the question a rep is asked in
+     a Monday meeting, and it should not require setting a filter to answer. */
+  const thisMonth = ymdInZone(new Date(), timeZone).slice(0, 7);
 
   for (const e of rows) {
+    const pid = e.player_id as string | null;
+
     if (e.event_type === "deposit_reversed") {
-      totalFtds = Math.max(0, totalFtds - 1);
+      if (pid) {
+        depositors.delete(pid);
+        depositorsThisMonth.delete(pid);
+      }
       continue;
     }
     if (e.event_type === "status_change") {
-      if (e.to_status === "VIP Transferred") totalVip += 1;
-      if (e.to_status === "First Deposit" || e.to_status === "Active") totalFtds += 1;
+      if (!pid) continue;
+      const month = ymdInZone(new Date(e.occurred_at), timeZone).slice(0, 7);
+
+      if (e.to_status === "VIP Transferred") {
+        transferred.add(pid);
+        if (month === thisMonth) transferredThisMonth.add(pid);
+      }
+      if (e.to_status === "First Deposit" || e.to_status === "Active") {
+        depositors.add(pid);
+        if (month === thisMonth) depositorsThisMonth.add(pid);
+      }
       continue;
     }
     totalLeads += 1;
@@ -337,8 +401,10 @@ export async function getRecords(
     currentStreak,
     longestStreak,
     totalLeads,
-    totalVip,
-    totalFtds,
+    totalVip: transferred.size,
+    totalFtds: depositors.size,
+    ftdsThisMonth: depositorsThisMonth.size,
+    vipThisMonth: transferredThisMonth.size,
   };
 }
 

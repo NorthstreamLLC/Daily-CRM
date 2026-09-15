@@ -313,7 +313,7 @@ export default async function StatsPage({
           <Metric
             label="VIP transfers"
             value={activity.vip.toLocaleString()}
-            sub={`${records.totalVip.toLocaleString()} all time`}
+            sub={`${records.vipThisMonth.toLocaleString()} in ${monthLabel} · ${records.totalVip.toLocaleString()} all time`}
             tone={
               isToday && targets.vipTransfers > 0 && activity.vip >= targets.vipTransfers
                 ? "success"
@@ -321,10 +321,15 @@ export default async function StatsPage({
             }
             icon={<TrendingUp size={14} />}
           />
+          {/* The monthly figure sits here rather than behind the date picker.
+              "How many deposits this month" is the question asked in a Monday
+              meeting, and it should not need a filter set to answer it. One
+              player counts once, whatever route they took to get there - see
+              the note on tally() in lib/stats. */}
           <Metric
             label="First deposits"
             value={activity.ftd.toLocaleString()}
-            sub={`${records.totalFtds.toLocaleString()} all time`}
+            sub={`${records.ftdsThisMonth.toLocaleString()} in ${monthLabel} · ${records.totalFtds.toLocaleString()} all time`}
             tone={
               isToday && targets.ftds > 0 && activity.ftd >= targets.ftds ? "success" : undefined
             }
