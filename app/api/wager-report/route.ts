@@ -79,7 +79,30 @@ export async function GET(request: Request) {
     }).format(new Date(`${monthKey}T12:00:00Z`));
     const cycleName = cycleLabel(new Date(`${cycleParam}T00:00:00Z`));
 
-    const report = await getWagerCycleReport(monthKey, monthKey, cycleParam, owner, 100000);
+    /* A CSV cell may hold any Unicode; an HTTP HEADER may not.
+
+       cycleLabel writes "16 Aug – 15 Sept" with an EN DASH, and Node refuses
+       to set a header containing a character outside Latin-1 - it throws
+       ERR_INVALID_CHAR, which surfaces as a 500 with no body. So the download
+       failed for a reason that had nothing to do with the data, the query or
+       the permissions: one punctuation mark in a header nobody reads.
+
+       Kept rather than deleted, because it is genuinely useful when a file is
+       already sitting in Downloads and its window is in doubt. Flattened to
+       ASCII, which a header can carry. */
+    const headerSafe = (s: string) =>
+      s.replace(/[‒-―−]/g, "-").replace(/[^\x20-\x7E]/g, "");
+
+    let report;
+    try {
+      report = await getWagerCycleReport(monthKey, monthKey, cycleParam, owner, 100000);
+    } catch (e) {
+      /* An export that fails should say so in words. A bare 500 on a link
+         click looks like the button is broken rather than the query. */
+      return new NextResponse(`Could not build the export: ${(e as Error).message}`, {
+        status: 500,
+      });
+    }
 
     /* Column order mirrors the table on screen, because the export is meant to
        BE the table - a file whose columns arrive in a different order than the
@@ -115,7 +138,7 @@ export async function GET(request: Request) {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="wager-${choice}-cycle-${cycleParam}-${stamp}.csv"`,
         "Cache-Control": "no-store",
-        "X-Report-Label": `${monthLabel} and leaderboard ${cycleName}`,
+        "X-Report-Label": headerSafe(`${monthLabel} and leaderboard ${cycleName}`),
       },
     });
   }
