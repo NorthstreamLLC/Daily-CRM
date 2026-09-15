@@ -1,23 +1,24 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Badge, Card, EmptyState, SectionHeader, cn } from "@/components/ui";
+import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { BarChart, Flame, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
 import { canSeeWager, getMe, getTargets } from "@/lib/queries";
 import {
   currentCycle,
   getFunnelStages,
   getWagerCycleReport,
+  type CycleRow,
 } from "@/lib/admin";
 import { formatDate, ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
 import { ViewAs } from "../ViewAs";
+import { DepositTabs } from "./DepositTabs";
 import { RefreshWager } from "./RefreshWager";
 import { WagerTable } from "./WagerTable";
 import { createClient } from "@/lib/supabase/server";
 import {
   getActivity,
   getFunnel,
-  getMonthDeposits,
+  getRecentDeposits,
   getRecords,
   getSourcePerformance,
   getTrend,
@@ -235,7 +236,7 @@ export default async function StatsPage({
     records,
     stages,
     wager,
-    monthDeposits,
+    recentDeposits,
     teamRes,
     ownerRes,
   ] = await Promise.all([
@@ -258,7 +259,7 @@ export default async function StatsPage({
       getWagerCycleReport(monthKey, monthKey, cycle.start, ownerId).catch(
         (e: Error) => ({ error: e.message }) as { error: string }
       ),
-      getMonthDeposits(ownerId, me.timezone),
+      getRecentDeposits(ownerId, me.timezone, cycle.startDate, cycle.endDate),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
         : Promise.resolve({ data: null }),
@@ -275,21 +276,30 @@ export default async function StatsPage({
   const conversion = funnel.leads > 0 ? funnel.reachedFtd / funnel.leads : 0;
   const isToday = range.key === "today";
 
-  /* What each of this month's depositors has wagered since, taken from the
-     rows already fetched above rather than a second query. Keyed on the
-     lowercased username because that is the only thing the two sides share -
-     a wager row belongs to a Roobet name, not to a player id. */
-  const monthWagerByUsername = new Map<string, number>(
-    "error" in wager
-      ? []
-      : wager.rows.map((r) => [r.username.trim().toLowerCase(), r.monthWagered])
+  /* What each depositor has wagered since, taken from the rows already fetched
+     above rather than a second query. Keyed on the lowercased username because
+     that is the only thing the two sides share - a wager row belongs to a
+     Roobet name, not to a player id.
+
+     Attached here rather than passed as a Map: the deposit list is a client
+     component, and everything crossing that boundary is serialised. Plain
+     values travel; cleverness does not. */
+  const wagerRows: CycleRow[] = "error" in wager ? [] : wager.rows;
+  const wagerByUsername = new Map(
+    wagerRows.map((r) => [r.username.trim().toLowerCase(), r] as const)
   );
 
-  const bookLink = (reference: string) =>
-    `/book?${new URLSearchParams({
-      q: reference,
-      ...(viewingSomeoneElse ? { owner: ownerId } : {}),
-    }).toString()}`;
+  const depositRows = recentDeposits.map((d) => {
+    const w = d.roobetUsername
+      ? wagerByUsername.get(d.roobetUsername.toLowerCase())
+      : undefined;
+    return {
+      ...d,
+      depositedLabel: formatDate(d.depositedAt, me.timezone),
+      wageredMonth: w?.monthWagered,
+      wageredCycle: w?.cycleWagered,
+    };
+  });
 
   return (
     <>
@@ -590,100 +600,39 @@ export default async function StatsPage({
       </section>
       )}
 
-      {/* WHO DEPOSITED THIS MONTH.
+      {/* WHO DEPOSITED, in either window.
 
           The card above says 14. This says which 14. A count on its own cannot
           be acted on or checked - and the mismatch that started this whole
           thread, a card reading 6 over a table showing 3, was only findable
           because someone happened to read both numbers at once.
 
+          Two tabs, because there are two calendars here and they disagree for
+          half of every month: the company reports on the calendar month, and
+          Roobet pays on the 16th-to-15th cycle.
+
           Outside the wager gate on purpose. A first deposit is not a dollar
           figure, so a rep who may not see wager amounts should still see who
-          deposited; only the money column below is withheld. */}
+          deposited; only the money column is withheld. */}
       <section className="mb-8">
         <SectionHeader
-          title={`First deposits in ${monthLabel}`}
-          count={monthDeposits.length}
-          hint="Newest first. Counted from the activity log, so this is the same set the card above counts — if the two ever disagree, one of them is wrong."
+          title="First deposits"
+          hint="Newest first, counted from the activity log — the same source as the card above, so the two cannot drift apart."
         />
-        {monthDeposits.length === 0 ? (
+        {depositRows.length === 0 ? (
           <EmptyState
             icon={<Wallet size={18} />}
-            title={`No first deposits in ${monthLabel} yet`}
+            title="No first deposits in either window yet"
             body="A deposit lands here when a player is moved to First Deposit, or when the wager sync sees them playing and moves them to Active."
           />
         ) : (
-          <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[40rem] text-left">
-                <thead>
-                  <tr className="border-b border-line bg-sunken">
-                    <Th>Player</Th>
-                    <Th>Roobet username</Th>
-                    <Th>Deposited</Th>
-                    <Th>Status</Th>
-                    {showWager && <Th align="right">Wagered {monthLabel}</Th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {monthDeposits.map((d) => {
-                    const wagered = d.roobetUsername
-                      ? monthWagerByUsername.get(d.roobetUsername.toLowerCase())
-                      : undefined;
-
-                    return (
-                      <tr key={d.playerId} className="border-b border-line last:border-0">
-                        <td className="px-4 py-2.5">
-                          <span className="font-medium text-ink">{d.handle}</span>
-                          {d.reference && (
-                            <Link
-                              href={bookLink(d.reference)}
-                              title={`Open ${d.handle} in the Book`}
-                              className="tabular ml-2 text-caption text-accent underline-offset-2 hover:underline"
-                            >
-                              {d.reference}
-                            </Link>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {/* A depositor with no Roobet username is the one row
-                              here worth acting on: they are money that arrived
-                              with nothing to attribute it to, and they cannot
-                              appear on any wager table at all. */}
-                          {d.roobetUsername ? (
-                            <span className="text-small font-medium text-accent">
-                              {d.roobetUsername}
-                            </span>
-                          ) : (
-                            <Badge tone="warning">No username</Badge>
-                          )}
-                        </td>
-                        <td className="tabular px-4 py-2.5 text-small text-ink">
-                          {formatDate(d.depositedAt, me.timezone)}
-                        </td>
-                        <td className="px-4 py-2.5 text-small text-ink-muted">{d.status}</td>
-                        {showWager && (
-                          <td
-                            className={cn(
-                              "tabular px-4 py-2.5 text-right text-body",
-                              wagered ? "font-medium text-ink" : "text-ink-subtle"
-                            )}
-                          >
-                            {wagered === undefined
-                              ? "—"
-                              : "$" +
-                                wagered.toLocaleString(undefined, {
-                                  maximumFractionDigits: 0,
-                                })}
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DepositTabs
+            rows={depositRows}
+            monthLabel={monthLabel}
+            cycleLabel={cycle.label}
+            showWager={showWager}
+            owner={viewingSomeoneElse ? ownerId : undefined}
+          />
         )}
       </section>
 

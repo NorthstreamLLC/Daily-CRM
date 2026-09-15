@@ -259,9 +259,9 @@ export async function getTrend(
   return Array.from(byDay.values());
 }
 
-/* -------------------------------------------------- This month's deposits */
+/* ---------------------------------------------------------- Recent deposits */
 
-export type MonthDeposit = {
+export type RecentDeposit = {
   playerId: string;
   reference: string | null;
   handle: string;
@@ -269,15 +269,23 @@ export type MonthDeposit = {
   status: string;
   /** ISO timestamp of the FIRST deposit-ish event, not the latest. */
   depositedAt: string;
+  /** Falls inside the current calendar month, in the viewer's timezone. */
+  inMonth: boolean;
+  /** Falls inside the current leaderboard cycle, which is a UTC window. */
+  inCycle: boolean;
 };
 
 /**
- * WHO DEPOSITED THIS MONTH, by name.
+ * WHO DEPOSITED, by name, in either window.
  *
  * The card says 14; this says which 14. A number on its own cannot be acted
  * on or checked - it was a count of fourteen people nobody could look at, and
  * the only way to find them was to sort the Book by a date column that does
  * not exist.
+ *
+ * Both windows come back in one list, each row tagged with which it falls in.
+ * Two queries would be two sets of date arithmetic to keep in step, and this
+ * codebase has already paid for that mistake once.
  *
  * Counted from activity_log rather than players.first_deposit_at, and
  * deliberately so: the card counts events in the log, and a list built from a
@@ -289,17 +297,24 @@ export type MonthDeposit = {
  * First Deposit and the sync later marking them Active is one deposit, and the
  * date that matters is the first one.
  */
-export async function getMonthDeposits(
+export async function getRecentDeposits(
   userId: string,
-  timeZone: string
-): Promise<MonthDeposit[]> {
+  timeZone: string,
+  /** The leaderboard window, in UTC - that is the frame Roobet runs it in. */
+  cycleStart: Date,
+  cycleEnd: Date
+): Promise<RecentDeposit[]> {
   const supabase = createClient();
 
-  /* 40 days back, then filtered to the calendar month in the viewer's zone.
-     A date boundary computed in SQL would have to reproduce the timezone
-     arithmetic that ymdInZone already does correctly; a slightly wide window
-     and one comparison in JS cannot drift from it. */
-  const since = startOfDayPlusUtc(timeZone, -40).toISOString();
+  /* Wide enough for BOTH windows, then each row is tagged for each.
+
+     The calendar month is judged in the viewer's zone, because that is the
+     frame every other activity count on this page uses. The leaderboard cycle
+     is judged in UTC, because that is the frame Roobet pays on. They are
+     different on purpose and a row can be in one, both or neither - on the
+     20th, a deposit from the 5th is in the month and not in the cycle. */
+  const monthBack = startOfDayPlusUtc(timeZone, -40).getTime();
+  const since = new Date(Math.min(monthBack, cycleStart.getTime())).toISOString();
   const thisMonth = ymdInZone(new Date(), timeZone).slice(0, 7);
 
   const { data } = await supabase
@@ -316,8 +331,18 @@ export async function getMonthDeposits(
   const earliest = new Map<string, string>();
   for (const e of data ?? []) {
     const id = e.player_id as string;
-    if (ymdInZone(new Date(e.occurred_at), timeZone).slice(0, 7) !== thisMonth) continue;
     if (!earliest.has(id)) earliest.set(id, e.occurred_at as string);
+  }
+
+  /* Anything in neither window is dropped here rather than in the query. The
+     fetch is deliberately wider than both so that "which window is this in"
+     is decided once, in one place, instead of by two sets of date arithmetic
+     that can drift apart. */
+  for (const [id, at] of Array.from(earliest.entries())) {
+    const t = new Date(at).getTime();
+    const inMonth = ymdInZone(new Date(at), timeZone).slice(0, 7) === thisMonth;
+    const inCycle = t >= cycleStart.getTime() && t < cycleEnd.getTime();
+    if (!inMonth && !inCycle) earliest.delete(id);
   }
 
   if (earliest.size === 0) return [];
@@ -328,14 +353,20 @@ export async function getMonthDeposits(
     .in("id", Array.from(earliest.keys()));
 
   return (players ?? [])
-    .map((p) => ({
-      playerId: p.id as string,
-      reference: p.reference as string | null,
-      handle: p.handle as string,
-      roobetUsername: (p.roobet_username as string | null)?.trim() || null,
-      status: p.status as string,
-      depositedAt: earliest.get(p.id as string)!,
-    }))
+    .map((p) => {
+      const depositedAt = earliest.get(p.id as string)!;
+      const t = new Date(depositedAt).getTime();
+      return {
+        playerId: p.id as string,
+        reference: p.reference as string | null,
+        handle: p.handle as string,
+        roobetUsername: (p.roobet_username as string | null)?.trim() || null,
+        status: p.status as string,
+        depositedAt,
+        inMonth: ymdInZone(new Date(depositedAt), timeZone).slice(0, 7) === thisMonth,
+        inCycle: t >= cycleStart.getTime() && t < cycleEnd.getTime(),
+      };
+    })
     .sort((a, b) => b.depositedAt.localeCompare(a.depositedAt));
 }
 
