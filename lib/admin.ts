@@ -1069,10 +1069,18 @@ export async function getWagerCycleReport(
     p_owner: ownerId ?? null,
   };
 
-  const [{ data, error }, { data: totalsData }] = await Promise.all([
-    supabase.rpc("wager_cycle_rows", { ...args, p_limit: limit }),
-    supabase.rpc("wager_cycle_totals", args),
-  ]);
+  const [{ data, error }, { data: totalsData }, { data: cyclesHeld }] =
+    await Promise.all([
+      supabase.rpc("wager_cycle_rows", { ...args, p_limit: limit }),
+      supabase.rpc("wager_cycle_totals", args),
+      /* "Has anything ever fetched this cycle" is a different question from
+         "did MY players wager in it", and only the first justifies telling an
+         admin to press Refresh. Answering it from the rows would have been
+         free and wrong: since migration 056 the rows include players who are
+         quiet, so a rep whose whole book is idle would produce all-zero cycle
+         figures and get told the data was missing when it was simply zero. */
+      supabase.rpc("wager_cycles_held", { p_limit: 48 }),
+    ]);
 
   /* A missing function is a missing migration, and it must not read as "no
      wager this month". The last time an RPC error was swallowed here, three
@@ -1127,9 +1135,9 @@ export async function getWagerCycleReport(
     cycleTotal: t ? Number(t.cycle_total) : 0,
     monthWagerers: t ? Number(t.month_wagerers) : 0,
     cycleWagerers: t ? Number(t.cycle_wagerers) : 0,
-    /* Zero across every row means nothing has ever fetched this cycle, which
-       needs a different sentence on screen than "nobody wagered". */
-    cycleNeverFetched: rows.length > 0 && rows.every((r) => r.cycleWagered === 0),
+    cycleNeverFetched: !((cyclesHeld ?? []) as { cycle_start: string }[]).some(
+      (c) => String(c.cycle_start).slice(0, 10) === cycleStart
+    ),
   };
 }
 
