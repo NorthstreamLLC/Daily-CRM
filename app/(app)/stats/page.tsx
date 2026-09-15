@@ -487,7 +487,7 @@ export default async function StatsPage({
         ) : wager.rows.length === 0 ? (
           <EmptyState
             icon={<Wallet size={18} />}
-            title={`No wager recorded in ${monthLabel} or this leaderboard cycle`}
+            title="No wager recorded for this book yet"
             body="Wager appears once a player's Roobet username is filled in and the sync has run. Ask an admin if you expected figures here."
           />
         ) : (
@@ -613,11 +613,20 @@ export default async function StatsPage({
                 </tbody>
               </table>
               </div>
-              {wager.rows.length > 25 && (
-                <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
-                  Showing your top 25 of {wager.rows.length}. The export has every row.
-                </p>
-              )}
+              {/* Zeroes are the point, not an oversight.
+
+                  Gwen's card read 6 first deposits while this table listed 3,
+                  because a player with nothing in either window used to be
+                  dropped - taking their lifetime figure with them. A row
+                  reading $0, $0, $842 says "this one has stopped", which is
+                  worth knowing. An absent row said nothing, quietly. */}
+              <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
+                {wager.rows.length > 25
+                  ? `Showing your top 25 of ${wager.rows.length}. The export has every row. `
+                  : ""}
+                Everyone with wager history is listed. Zeroes in both windows with
+                an all-time figure means they have gone quiet — worth a message.
+              </p>
             </div>
           </>
         )}

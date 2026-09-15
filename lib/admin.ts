@@ -1001,6 +1001,11 @@ export async function getWagerReport(
  *
  * Both are stored facts fetched from Roobet as whole windows. Neither is
  * derived from the other, and neither is a sum of days - see migration 055.
+ *
+ * ROWS ARE NOT LIMITED TO THE WINDOWS. Anyone with any wager history appears,
+ * carrying zeroes where they were quiet (migration 056). A depositor who has
+ * stopped playing is exactly the person a rep needs to see, and the previous
+ * version dropped them for having nothing this month.
  */
 export type CycleRow = {
   username: string;
