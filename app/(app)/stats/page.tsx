@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { BarChart, Flame, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
@@ -10,6 +11,7 @@ import {
 import { ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
 import { ViewAs } from "../ViewAs";
+import { CopyHandle } from "../CopyHandle";
 import { RefreshWager } from "./RefreshWager";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -539,10 +541,15 @@ export default async function StatsPage({
             )}
 
             <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
-              <table className="w-full text-left">
+              {/* Six columns is more than a phone has room for. Scrolling the
+                  table sideways beats squeezing a dollar figure onto two lines
+                  or dropping a column nobody asked to lose. */}
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[46rem] text-left">
                 <thead>
                   <tr className="border-b border-line bg-sunken">
                     <Th>Player</Th>
+                    <Th>Roobet username</Th>
                     <Th>Status</Th>
                     <Th align="right">{monthLabel}</Th>
                     <Th align="right">
@@ -558,20 +565,38 @@ export default async function StatsPage({
                   {wager.rows.slice(0, 25).map((r) => (
                     <tr key={r.username} className="border-b border-line last:border-0">
                       <td className="px-4 py-2.5">
-                        {/* BOTH NAMES, same reason as the daily queue: reps
-                            know their players by Roobet username, because that
-                            is the name on the leaderboard and in the affiliate
-                            panel. The handle alone meant reading a row and not
-                            recognising the person in it. */}
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="font-medium text-ink">{r.handle ?? "—"}</span>
-                          <span className="truncate text-small font-medium text-accent">
-                            {r.username}
-                          </span>
-                        </div>
-                        <span className="tabular text-caption text-ink-subtle">
-                          {r.reference}
-                        </span>
+                        <span className="font-medium text-ink">{r.handle ?? "—"}</span>
+                        {/* The reference is the way back to the record. This
+                            table can tell you someone wagered $793,000 and
+                            until now the only route to their profile was
+                            retyping a code you were already looking at. */}
+                        {r.reference && (
+                          <Link
+                            href={`/book?${new URLSearchParams({
+                              q: r.reference,
+                              ...(viewingSomeoneElse ? { owner: ownerId } : {}),
+                            }).toString()}`}
+                            title={`Open ${r.handle ?? r.username} in the Book`}
+                            className="tabular ml-2 text-caption text-accent underline-offset-2 hover:underline"
+                          >
+                            {r.reference}
+                          </Link>
+                        )}
+                      </td>
+                      {/* ITS OWN COLUMN, and click-to-copy.
+
+                          This is the name that gets pasted into Roobet's
+                          affiliate panel, and it is the name a rep recognises -
+                          the handle is a Discord name they may never have read.
+                          Copying rather than linking, because that is what this
+                          control means everywhere else in the app: the daily
+                          queue and the Book both copy on click. */}
+                      <td className="px-4 py-2.5">
+                        <CopyHandle
+                          handle={r.username}
+                          tone="accent"
+                          label={`Copy the Roobet username ${r.username}`}
+                        />
                       </td>
                       <td className="px-4 py-2.5 text-small text-ink-muted">{r.status}</td>
                       <td className="tabular px-4 py-2.5 text-right text-body font-medium text-ink">
@@ -587,6 +612,7 @@ export default async function StatsPage({
                   ))}
                 </tbody>
               </table>
+              </div>
               {wager.rows.length > 25 && (
                 <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
                   Showing your top 25 of {wager.rows.length}. The export has every row.

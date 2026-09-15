@@ -81,9 +81,12 @@ export async function GET(request: Request) {
 
     const report = await getWagerCycleReport(monthKey, monthKey, cycleParam, owner, 100000);
 
+    /* Column order mirrors the table on screen, because the export is meant to
+       BE the table - a file whose columns arrive in a different order than the
+       page they were exported from is a file people re-sort by hand. */
     const columns = [
-      { key: "username", label: "Roobet Username" },
       { key: "handle", label: "Player" },
+      { key: "username", label: "Roobet Username" },
       { key: "reference", label: "Reference" },
       { key: "owner", label: "Rep" },
       { key: "status", label: "Status" },
