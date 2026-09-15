@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getMe, type Me } from "@/lib/queries";
+import { cycleEndUtc, cycleLabel, cycleStartUtc } from "@/lib/wager-sync";
 
 export type TeamMember = {
   id: string;
@@ -983,6 +984,147 @@ export async function getWagerReport(
       ? Number(t.unclaimed)
       : rows.filter((r) => !r.ownerId).reduce((a, r) => a + r.wagered, 0),
     wagererCount: t ? Number(t.wagerers) : rows.length,
+  };
+}
+
+/* ------------------------------------------- Month and leaderboard together */
+
+/**
+ * THE TWO WINDOWS A REP ACTUALLY ASKS ABOUT.
+ *
+ * "How much this month" and "how much this leaderboard" are different
+ * questions with different answers, and for two weeks of every month they are
+ * different by most of the total. On the 5th, the month holds five days and
+ * the cycle holds nineteen; on the 20th it is the other way round. A single
+ * "wagered" column could only ever answer one of them, and whichever it
+ * answered, half the conversations about it were wrong.
+ *
+ * Both are stored facts fetched from Roobet as whole windows. Neither is
+ * derived from the other, and neither is a sum of days - see migration 055.
+ */
+export type CycleRow = {
+  username: string;
+  monthWagered: number;
+  cycleWagered: number;
+  sources: string;
+  playerId: string | null;
+  reference: string | null;
+  handle: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  status: string | null;
+  allTime: number;
+};
+
+export type CycleReport = {
+  rows: CycleRow[];
+  monthTotal: number;
+  cycleTotal: number;
+  monthWagerers: number;
+  cycleWagerers: number;
+  /** True when the leaderboard period has never been fetched. */
+  cycleNeverFetched: boolean;
+};
+
+/**
+ * The leaderboard window containing `now`, as the database stores it.
+ *
+ * Kept here rather than in the sync module because the page needs the label
+ * and the sync needs the dates, and one definition serving both is what stops
+ * the heading disagreeing with the figure underneath it.
+ */
+export function currentCycle(now = new Date()): {
+  start: string;
+  startDate: Date;
+  endDate: Date;
+  label: string;
+} {
+  const startDate = cycleStartUtc(now);
+  return {
+    start: isoDay(startDate),
+    startDate,
+    endDate: cycleEndUtc(startDate),
+    label: cycleLabel(startDate),
+  };
+}
+
+export async function getWagerCycleReport(
+  monthFrom: string,
+  monthTo: string,
+  cycleStart: string,
+  ownerId?: string,
+  limit = 5000
+): Promise<CycleReport> {
+  const supabase = createClient();
+
+  const args = {
+    p_month_from: monthFrom,
+    p_month_to: monthTo,
+    p_cycle: cycleStart,
+    p_owner: ownerId ?? null,
+  };
+
+  const [{ data, error }, { data: totalsData }] = await Promise.all([
+    supabase.rpc("wager_cycle_rows", { ...args, p_limit: limit }),
+    supabase.rpc("wager_cycle_totals", args),
+  ]);
+
+  /* A missing function is a missing migration, and it must not read as "no
+     wager this month". The last time an RPC error was swallowed here, three
+     re-syncs were spent chasing data that was never going to appear. */
+  if (error && /does not exist|schema cache/i.test(error.message)) {
+    throw new Error(
+      "Run migration 20260812000055_leaderboard_cycle.sql - the wager table needs it."
+    );
+  }
+  if (error) throw error;
+
+  const raw = (data ?? []) as {
+    username: string;
+    month_wagered: number;
+    cycle_wagered: number;
+    sources: string;
+    player_id: string | null;
+    reference: string | null;
+    handle: string | null;
+    owner_id: string | null;
+    owner_name: string | null;
+    status: string | null;
+    all_time: number;
+  }[];
+
+  const rows: CycleRow[] = raw.map((r) => ({
+    username: r.username,
+    monthWagered: Number(r.month_wagered),
+    cycleWagered: Number(r.cycle_wagered),
+    sources: r.sources,
+    playerId: r.player_id,
+    reference: r.reference,
+    handle: r.handle,
+    ownerId: r.owner_id,
+    ownerName: r.owner_name,
+    status: r.status,
+    allTime: Number(r.all_time),
+  }));
+
+  const t = (totalsData ?? [])[0] as
+    | {
+        month_total: number;
+        cycle_total: number;
+        month_wagerers: number;
+        cycle_wagerers: number;
+      }
+    | undefined;
+
+  return {
+    rows,
+    monthTotal: t ? Number(t.month_total) : 0,
+    cycleTotal: t ? Number(t.cycle_total) : 0,
+    monthWagerers: t ? Number(t.month_wagerers) : 0,
+    cycleWagerers: t ? Number(t.cycle_wagerers) : 0,
+    /* Zero across every row means nothing has ever fetched this cycle, which
+       needs a different sentence on screen than "nobody wagered". */
+    cycleNeverFetched: rows.length > 0 && rows.every((r) => r.cycleWagered === 0),
   };
 }
 

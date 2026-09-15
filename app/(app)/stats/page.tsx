@@ -3,14 +3,14 @@ import { Card, EmptyState, SectionHeader, cn } from "@/components/ui";
 import { BarChart, Flame, Target, TrendingUp, UserCheck, Wallet } from "@/components/icons";
 import { canSeeWager, getMe, getTargets } from "@/lib/queries";
 import {
+  currentCycle,
   getFunnelStages,
-  getWagerReport,
-  reportChoiceFor,
-  resolveReportPeriod,
+  getWagerCycleReport,
 } from "@/lib/admin";
 import { ymdInZone } from "@/lib/time";
 import { RangePicker } from "../RangePicker";
 import { ViewAs } from "../ViewAs";
+import { RefreshWager } from "./RefreshWager";
 import { createClient } from "@/lib/supabase/server";
 import {
   getActivity,
@@ -190,15 +190,29 @@ export default async function StatsPage({
 
   const supabase = createClient();
 
-  /* Wager cannot follow the rolling ranges above it.
-  
-     Roobet is only ever asked for whole UTC periods, so "last 30 days" has no
-     wager figure - the nearest true window is the current UTC month. On the
-     3rd of the month that is 3 days of wager sitting beside 30 days of
-     outreach. Labelling both "last 30 days" would be a straightforward lie,
-     so the wager card carries its own period name. */
-  const wagerPeriod = resolveReportPeriod(reportChoiceFor(range.key));
-  const rangesDiffer = wagerPeriod.label.toLowerCase() !== range.label.toLowerCase();
+  /* WAGER DOES NOT FOLLOW THE RANGE PICKER, and now says so.
+
+     Roobet is only ever asked for whole UTC windows, so "last 30 days" has no
+     wager figure at all. The old version mapped the picker onto the nearest
+     real period and then printed the PICKER's label over the period's numbers -
+     so a column headed "Last 30 days" held this month's figures, which on the
+     3rd is three days of money under a thirty-day heading. Isac read it as
+     stale data. It was not stale; it was mislabelled, which is worse, because
+     a stale number gets refreshed and a mislabelled one gets believed.
+
+     So the section is now pinned to the two windows the business actually
+     runs on, each named on screen: the calendar month, and the leaderboard
+     cycle that runs the 16th to the 15th. */
+  const nowUtc = new Date();
+  const monthStart = new Date(
+    Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), 1)
+  );
+  const monthKey = monthStart.toISOString().slice(0, 10);
+  const monthLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    timeZone: "UTC",
+  }).format(monthStart);
+  const cycle = currentCycle(nowUtc);
 
   /* Started, not awaited. Only getRecords needs a number out of this, and
      awaiting it on its own line made all eight queries below queue behind one
@@ -222,7 +236,13 @@ export default async function StatsPage({
          security definer, and definer is precisely what bypasses RLS. This
          page showed Prime the company's 244 players when he has one. */
       getFunnelStages(ownerId),
-      getWagerReport(wagerPeriod.period, ownerId),
+      /* Caught rather than thrown. A missing migration here used to take the
+         whole Stats page down with a digest number and nothing else - the
+         wager table is one section, and one section failing should cost one
+         section. */
+      getWagerCycleReport(monthKey, monthKey, cycle.start, ownerId).catch(
+        (e: Error) => ({ error: e.message }) as { error: string }
+      ),
       isAdmin
         ? supabase.from("users").select("id, name").eq("active", true).order("name")
         : Promise.resolve({ data: null }),
@@ -437,57 +457,86 @@ export default async function StatsPage({
       <section className="mb-8">
         <SectionHeader
           title="What your players wagered"
-          hint={
-            rangesDiffer
-              ? `Weighted wager from your book. Roobet reports whole UTC periods, so this shows ${wagerPeriod.label.toLowerCase()} — not ${range.label.toLowerCase()} like the figures above.`
-              : "Weighted wager from your book in this window. This is what your leads are actually worth."
-          }
+          hint={`Weighted wager from your book, asked of Roobet as whole UTC windows. Two of them: ${monthLabel} so far, and the leaderboard cycle running ${cycle.label}. Neither follows the date picker above — they cannot.`}
           action={
-            wager.rows.length > 0 ? (
-              <a
-                href={`/api/wager-report?${new URLSearchParams({
-                  ...(range.start ? { from: range.start.toISOString() } : {}),
-                  ...(range.end ? { to: range.end.toISOString() } : {}),
-                  label: range.label,
-                }).toString()}`}
-                className="text-small font-medium text-accent underline-offset-2 hover:underline"
-              >
-                Export CSV
-              </a>
-            ) : undefined
+            <div className="flex items-start gap-4">
+              {!("error" in wager) && wager.rows.length > 0 && (
+                <a
+                  href={`/api/wager-report?${new URLSearchParams({
+                    period: monthKey.slice(0, 7),
+                    cycle: cycle.start,
+                    owner: ownerId,
+                  }).toString()}`}
+                  className="text-small font-medium text-accent underline-offset-2 hover:underline"
+                >
+                  Export CSV
+                </a>
+              )}
+              {isAdmin && <RefreshWager />}
+            </div>
           }
         />
-        {wager.rows.length === 0 ? (
+        {"error" in wager ? (
           <EmptyState
             icon={<Wallet size={18} />}
-            title={`No wager recorded in ${range.label.toLowerCase()}`}
+            title="The wager table could not load"
+            body={wager.error}
+          />
+        ) : wager.rows.length === 0 ? (
+          <EmptyState
+            icon={<Wallet size={18} />}
+            title={`No wager recorded in ${monthLabel} or this leaderboard cycle`}
             body="Wager appears once a player's Roobet username is filled in and the sync has run. Ask an admin if you expected figures here."
           />
         ) : (
           <>
-            <div className="mb-3 grid gap-3 sm:grid-cols-2">
+            <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Metric
-                label={`Wagered — ${wagerPeriod.label.toLowerCase()}`}
+                label={`Wagered — ${monthLabel}`}
                 value={
                   "$" +
-                  wager.total.toLocaleString(undefined, { maximumFractionDigits: 0 })
+                  wager.monthTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })
                 }
-                sub={`${wager.wagererCount} of your players wagered`}
+                sub={`${wager.monthWagerers} of your players wagered`}
                 icon={<Wallet size={14} />}
+              />
+              {/* The window commission is argued over. Named by its dates on
+                  purpose - "this cycle" means two different things depending
+                  on which side of the 16th you read it. */}
+              <Metric
+                label="Leaderboard cycle"
+                value={
+                  "$" +
+                  wager.cycleTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })
+                }
+                sub={`${cycle.label} · ${wager.cycleWagerers} wagered`}
+                icon={<Target size={14} />}
               />
               <Metric
                 label="Average per wagering player"
                 value={
                   "$" +
-                  (wager.wagererCount > 0
-                    ? Math.round(wager.total / wager.wagererCount)
+                  (wager.monthWagerers > 0
+                    ? Math.round(wager.monthTotal / wager.monthWagerers)
                     : 0
                   ).toLocaleString()
                 }
-                sub="In this window"
+                sub={`Across ${monthLabel}`}
                 icon={<TrendingUp size={14} />}
               />
             </div>
+
+            {/* Nothing stored for the cycle at all. Said plainly rather than
+                shown as a column of zeroes, which reads as "nobody wagered"
+                and is a different claim entirely. */}
+            {wager.cycleNeverFetched && (
+              <p className="mb-3 rounded-control border border-warning bg-warning-soft px-3 py-2 text-small text-ink">
+                No leaderboard figures stored for {cycle.label} yet.
+                {isAdmin
+                  ? " Press Refresh figures above — the first run fetches the past year of cycles."
+                  : " Ask an admin to press Refresh figures on their Stats page."}
+              </p>
+            )}
 
             <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
               <table className="w-full text-left">
@@ -495,7 +544,13 @@ export default async function StatsPage({
                   <tr className="border-b border-line bg-sunken">
                     <Th>Player</Th>
                     <Th>Status</Th>
-                    <Th align="right">{range.label}</Th>
+                    <Th align="right">{monthLabel}</Th>
+                    <Th align="right">
+                      Leaderboard
+                      <span className="block font-normal normal-case tracking-normal text-ink-subtle">
+                        {cycle.label}
+                      </span>
+                    </Th>
                     <Th align="right">All time</Th>
                   </tr>
                 </thead>
@@ -503,14 +558,27 @@ export default async function StatsPage({
                   {wager.rows.slice(0, 25).map((r) => (
                     <tr key={r.username} className="border-b border-line last:border-0">
                       <td className="px-4 py-2.5">
-                        <span className="font-medium text-ink">{r.handle}</span>
-                        <span className="tabular ml-2 text-caption text-ink-subtle">
+                        {/* BOTH NAMES, same reason as the daily queue: reps
+                            know their players by Roobet username, because that
+                            is the name on the leaderboard and in the affiliate
+                            panel. The handle alone meant reading a row and not
+                            recognising the person in it. */}
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-medium text-ink">{r.handle ?? "—"}</span>
+                          <span className="truncate text-small font-medium text-accent">
+                            {r.username}
+                          </span>
+                        </div>
+                        <span className="tabular text-caption text-ink-subtle">
                           {r.reference}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-small text-ink-muted">{r.status}</td>
                       <td className="tabular px-4 py-2.5 text-right text-body font-medium text-ink">
-                        ${r.wagered.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        ${r.monthWagered.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="tabular px-4 py-2.5 text-right text-body text-ink">
+                        ${r.cycleWagered.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </td>
                       <td className="tabular px-4 py-2.5 text-right text-body text-ink-muted">
                         ${r.allTime.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -521,7 +589,7 @@ export default async function StatsPage({
               </table>
               {wager.rows.length > 25 && (
                 <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
-                  Showing your top 25 of {wager.rows.length}.
+                  Showing your top 25 of {wager.rows.length}. The export has every row.
                 </p>
               )}
             </div>

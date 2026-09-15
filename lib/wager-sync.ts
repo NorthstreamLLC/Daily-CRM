@@ -155,6 +155,56 @@ function dayStartUtc(d: Date) {
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
+/* -------------------------------------------------------- Leaderboard cycle */
+
+/** The day the leaderboard resets. */
+export const LEADERBOARD_RESET_DAY = 16;
+
+/**
+ * Midnight UTC on the 16th at or before `d` - the start of the cycle `d` is in.
+ *
+ * On the 15th you are still in last month's cycle, which is the whole reason
+ * this cannot be derived from the month. The 15th of September belongs to the
+ * window that opened on 16 August, and a rep looking at the leaderboard on the
+ * 15th is looking at that window.
+ */
+export function cycleStartUtc(d: Date) {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  return d.getUTCDate() >= LEADERBOARD_RESET_DAY
+    ? new Date(Date.UTC(y, m, LEADERBOARD_RESET_DAY))
+    : new Date(Date.UTC(y, m - 1, LEADERBOARD_RESET_DAY));
+}
+
+/** The exclusive end of the cycle that began on `start` - the next 16th. */
+export function cycleEndUtc(start: Date) {
+  return new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, LEADERBOARD_RESET_DAY)
+  );
+}
+
+/** The cycle before this one. */
+export function previousCycleStart(start: Date) {
+  return new Date(
+    Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - 1, LEADERBOARD_RESET_DAY)
+  );
+}
+
+/**
+ * "16 Aug – 15 Sep". Written out rather than called "this cycle", because a
+ * number on a commission page should say which days it covers.
+ */
+export function cycleLabel(start: Date) {
+  const last = new Date(cycleEndUtc(start).getTime() - 86_400_000);
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(d);
+  return `${fmt(start)} – ${fmt(last)}`;
+}
+
 /**
  * The periods the sync refreshes every run.
  *
@@ -162,7 +212,7 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
  * same figure the affiliate panel shows and commission is paid on.
  */
 export type SyncPeriod = {
-  type: "all" | "month" | "week" | "day";
+  type: "all" | "month" | "week" | "day" | "leaderboard";
   start: Date;
   key: string;
   /** A closed period ends at its boundary, not at "now". */
@@ -170,7 +220,7 @@ export type SyncPeriod = {
 };
 
 /** How long after a boundary we keep topping up the period that just closed. */
-const GRACE_HOURS = { day: 6, week: 6, month: 12 };
+const GRACE_HOURS = { day: 6, week: 6, month: 12, leaderboard: 12 };
 
 /**
  * Which windows to refresh on this run.
@@ -192,7 +242,17 @@ export function currentPeriods(now = new Date()): SyncPeriod[] {
   const dayStart = dayStartUtc(now);
   const weekStart = weekStartUtc(now);
   const monthStart = monthStartUtc(now);
+  const cycleStart = cycleStartUtc(now);
 
+  /* ORDER MATTERS, and not for the reason it looks like.
+
+     runWagerSync stops a source at its first failing period, so whatever sits
+     last in this list is what a failure costs. The leaderboard is deliberately
+     last: it is the newest period type, the only one that can be rejected
+     outright by a database where migration 055 has not been run yet, and the
+     only one whose absence breaks nothing else. Put it third and a deploy that
+     lands before the migration would take the week and the day down with it -
+     which is how five days of August went missing the first time. */
   const periods: SyncPeriod[] = [
     { type: "all", start: new Date("2020-01-01T00:00:00Z"), key: "1970-01-01" },
     { type: "month", start: monthStart, key: ymd(monthStart) },
@@ -218,6 +278,18 @@ export function currentPeriods(now = new Date()): SyncPeriod[] {
       Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() - 1, 1)
     );
     periods.push({ type: "month", start: prev, key: ymd(prev), end: monthStart });
+  }
+
+  /* The leaderboard cycle, last for the reason given above.
+
+     The one that closed at midnight on the 16th gets the same top-up as the
+     month, and for a sharper reason: the cycle total IS the leaderboard, so a
+     figure that lost its last few hours is a figure someone will argue with. */
+  periods.push({ type: "leaderboard", start: cycleStart, key: ymd(cycleStart) });
+
+  if (hoursInto(cycleStart) < GRACE_HOURS.leaderboard) {
+    const prev = previousCycleStart(cycleStart);
+    periods.push({ type: "leaderboard", start: prev, key: ymd(prev), end: cycleStart });
   }
 
   return periods;
