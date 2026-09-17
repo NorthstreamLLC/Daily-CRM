@@ -21,6 +21,11 @@ type SourceResult = {
   error?: string;
 };
 
+type AllResult = {
+  message: string;
+  phases: { phase: string; ran: boolean; detail: string; errors: string[] }[];
+};
+
 type BackfillResult = {
   name: string;
   months: number;
@@ -72,6 +77,10 @@ export function WagerSync({
 
   const [pending, start] = useTransition();
   const [rowResult, setRowResult] = useState<string | null>(null);
+
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [allResult, setAllResult] = useState<AllResult | null>(null);
+  const [allError, setAllError] = useState<string | null>(null);
 
   const [fillingDays, setFillingDays] = useState(false);
   const [dayResult, setDayResult] =
@@ -134,6 +143,30 @@ export function WagerSync({
       setDayError((e as Error).message);
     } finally {
       setFillingDays(false);
+    }
+  }
+
+  /* Everything, in one press. The route runs the phases in order and reports
+     each separately - "it worked" from three operations at once is useless the
+     day one of them silently does nothing. */
+  async function syncEverything() {
+    setSyncingAll(true);
+    setAllResult(null);
+    setAllError(null);
+    try {
+      const response = await fetch("/api/wager-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: 30, cycles: 12 }),
+      });
+      const body = await response.json();
+      if (body.error) setAllError(String(body.error));
+      else setAllResult(body as AllResult);
+      router.refresh();
+    } catch (e) {
+      setAllError((e as Error).message);
+    } finally {
+      setSyncingAll(false);
     }
   }
 
@@ -323,9 +356,66 @@ export function WagerSync({
 
       {/* Sync */}
       <div className="border-t border-line pt-4">
-        <div className="flex flex-wrap items-center gap-3">
+        {/* ONE BUTTON, and the other three kept underneath it.
+
+            The difference between Sync, Fill missing days and the cycle
+            refresh was only knowable by having read the code, and the failure
+            mode is silent: press the wrong one and it reports success having
+            not touched the thing that was broken. Isac pressed Sync three
+            times waiting for 23 August to come back, and it never could have.
+
+            So the default does all three and says what each one found. The
+            individual buttons stay for when you know exactly what you want -
+            they are much faster than the full run. */}
+        <div className="mb-4 rounded-card border border-line bg-sunken/50 p-3">
           <Button
             variant="primary"
+            icon={<RefreshCw size={15} />}
+            loading={syncingAll}
+            disabled={sources.filter((s) => s.active).length === 0}
+            onClick={syncEverything}
+          >
+            {syncingAll ? "Working… don't close this tab" : "Sync everything"}
+          </Button>
+          <p className="mt-2 max-w-2xl text-caption text-ink-subtle">
+            Today&rsquo;s figures, then any missing days, then any leaderboard
+            cycle never fetched. Up to a few minutes on the first run. Leads,
+            transfers and deposits are not synced by this or anything else —
+            they are logged as the work happens, so there is nothing to fetch.
+          </p>
+
+          {allError && (
+            <div className="mt-3">
+              <Notice tone="danger">{allError}</Notice>
+            </div>
+          )}
+
+          {allResult && (
+            <div className="mt-3 space-y-1.5">
+              <p className="text-small font-medium text-ink">{allResult.message}</p>
+              {allResult.phases.map((p) => (
+                <div
+                  key={p.phase}
+                  className="rounded-control border border-line bg-surface px-3 py-2"
+                >
+                  <p className="text-small text-ink">
+                    <span className="font-medium">{p.phase}</span>
+                    <span className="text-ink-muted"> — {p.detail}</span>
+                  </p>
+                  {p.errors.map((e) => (
+                    <p key={e} className="mt-0.5 text-caption text-danger">
+                      {e}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="secondary"
             icon={<RefreshCw size={15} />}
             loading={running}
             disabled={sources.filter((s) => s.active).length === 0}

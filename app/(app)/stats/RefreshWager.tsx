@@ -58,7 +58,7 @@ export function RefreshWager() {
         type="button"
         onClick={run}
         disabled={running}
-        title="Ask Roobet again for this month, this leaderboard cycle and all time"
+        title="Ask Roobet again for this month, this leaderboard cycle and all time. For everything including missing days, use Sync everything in Admin > Settings > Wager."
         className={cn(
           "inline-flex items-center gap-1.5 rounded-control border border-line px-2.5 py-1",
           "text-small font-medium text-ink-muted transition-colors duration-fast",
