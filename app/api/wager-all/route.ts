@@ -196,10 +196,15 @@ export async function POST(request: Request) {
       }
 
       let done = 0;
+      let attempted = 0;
+      let empty = 0;
       const errors: string[] = [];
 
       for (const cycle of missing) {
         if (!room()) break;
+        attempted += 1;
+
+        let rows = 0;
         for (const source of sources) {
           const outcome = await refreshPeriod(admin, source, {
             type: "leaderboard",
@@ -208,9 +213,20 @@ export async function POST(request: Request) {
             end: cycle.end,
           });
           if ("error" in outcome) errors.push(`${cycle.key} ${source.name}: ${outcome.error}`);
+          else rows += outcome.rows;
         }
-        done += 1;
+
+        /* ROWS, not absence of error. A cycle Roobet answers with an empty
+           list is not filled - it is a window there is no data for, which for
+           a period before the business existed is the expected answer and for
+           a recent one is a problem. Either way, reporting it as "filled" is
+           how a no-op gets counted as a win. This check exists in the
+           standalone cycles route and I failed to carry it here. */
+        if (rows > 0) done += 1;
+        else empty += 1;
       }
+
+      const leftover = missing.length - attempted;
 
       phases.push({
         phase: "Leaderboard cycles",
@@ -218,8 +234,9 @@ export async function POST(request: Request) {
         detail:
           missing.length === 0
             ? `all ${cycles} held already`
-            : `filled ${done} of ${missing.length} missing` +
-              (done < missing.length ? " - press again for the rest" : ""),
+            : `${done} of ${attempted} recovered` +
+              (empty > 0 ? `, ${empty} returned no data` : "") +
+              (leftover > 0 ? `, ${leftover} left for the next press` : ""),
         errors: errors.slice(0, 6),
       });
     }
