@@ -113,21 +113,35 @@ export async function POST(request: Request) {
     },
   ];
 
+  /* The oldest period we hold anything for. A cycle ending at or before it
+     cannot contain data, comes back empty, writes nothing, and so never
+     counts as held - which without this floor means retrying the same dead
+     windows on every single press, forever. */
+  const { data: oldest } = await admin
+    .from("wager_periods")
+    .select("period_start")
+    .neq("period_type", "all")
+    .order("period_start", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const floor = oldest
+    ? new Date(`${String(oldest.period_start).slice(0, 10)}T00:00:00Z`)
+    : null;
+
   /* Past cycles, newest first, only the empty ones. Closed windows get an
      explicit end date so each is a complete fact rather than "start to now",
      which would bleed every later cycle into the one being repaired. */
   let cursor = previousCycleStart(thisCycle);
   for (let i = 0; i < backfillCycles; i++) {
+    const end = cycleEndUtc(cursor);
+    if (floor && end.getTime() <= floor.getTime()) break;
+
     const key = ymd(cursor);
     if (!haveCycle.has(key)) {
       jobs.push({
         label: `leaderboard ${key}`,
-        period: {
-          type: "leaderboard",
-          start: new Date(cursor),
-          key,
-          end: cycleEndUtc(cursor),
-        },
+        period: { type: "leaderboard", start: new Date(cursor), key, end },
       });
     }
     cursor = previousCycleStart(cursor);

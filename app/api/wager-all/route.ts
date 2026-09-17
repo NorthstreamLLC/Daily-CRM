@@ -183,14 +183,39 @@ export async function POST(request: Request) {
         )
       );
 
+      /* HOW FAR BACK IS WORTH ASKING.
+
+         A cycle from before the business had any wagering comes back empty,
+         writes nothing, and therefore never counts as held - so without this
+         every press would retry the same dead windows forever, and the line
+         reporting them would become noise people learn to skip.
+
+         The oldest period we hold anything for is the floor. A cycle that
+         ENDS at or before it cannot contain data; a cycle that straddles it
+         might, so that one is still asked. */
+      const { data: oldest } = await admin
+        .from("wager_periods")
+        .select("period_start")
+        .neq("period_type", "all")
+        .order("period_start", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      const floor = oldest
+        ? new Date(`${String(oldest.period_start).slice(0, 10)}T00:00:00Z`)
+        : null;
+
       const ymd = (d: Date) => d.toISOString().slice(0, 10);
       const missing: { key: string; start: Date; end: Date }[] = [];
       let cursor = previousCycleStart(cycleStartUtc(new Date()));
 
       for (let i = 0; i < cycles; i++) {
+        const end = cycleEndUtc(cursor);
+        if (floor && end.getTime() <= floor.getTime()) break;
+
         const key = ymd(cursor);
         if (!have.has(key)) {
-          missing.push({ key, start: new Date(cursor), end: cycleEndUtc(cursor) });
+          missing.push({ key, start: new Date(cursor), end });
         }
         cursor = previousCycleStart(cursor);
       }
