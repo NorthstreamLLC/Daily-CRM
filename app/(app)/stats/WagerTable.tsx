@@ -43,6 +43,7 @@ type Row = {
   handle: string | null;
   status: string | null;
   allTime: number;
+  neverWagered: boolean;
 };
 
 const money = (n: number) =>
@@ -68,6 +69,8 @@ export function WagerTable({
 }) {
   const [page, setPage] = useState(1);
 
+  const flagged = rows.filter((r) => r.neverWagered).length;
+
   const bookHref = (reference: string) =>
     `/book?${new URLSearchParams({
       q: reference,
@@ -81,6 +84,20 @@ export function WagerTable({
 
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface shadow-card">
+      {/* Said above the table as well as on the row. With paging, a count the
+          reader has to go looking for is a count they will not find - and
+          these sort to the top precisely so they are on the first page. */}
+      {flagged > 0 && (
+        <p className="border-b border-line bg-danger-soft px-4 py-2.5 text-small text-ink">
+          <span className="font-medium">
+            {flagged} player{flagged === 1 ? " is" : "s are"} marked as playing but
+            {flagged === 1 ? " has" : " have"} never wagered.
+          </span>{" "}
+          Check the Roobet username on their profile — or whether they really signed
+          up on your code. Listed first below.
+        </p>
+      )}
+
       {/* Six columns is more than a phone has room for. Scrolling the table
           sideways beats squeezing a dollar figure onto two lines or dropping a
           column nobody asked to lose. */}
@@ -139,6 +156,23 @@ export function WagerTable({
                   </td>
                   <td className="px-4 py-2.5 text-small text-ink-muted">
                     {r.status}
+                    {/* THE CONTRADICTION, said out loud.
+
+                        Marked as playing and Roobet has never reported them.
+                        A player may tell a rep they are wagering to unlock a
+                        bonus when they are not, or may have signed up without
+                        the rep's code - either way the rep keeps working a
+                        relationship on money that is not there. This is the
+                        only row on the page worth interrupting for, so it
+                        gets the stronger colour and sorts to the top. */}
+                    {r.neverWagered && (
+                      <span
+                        className="ml-2 rounded-full bg-danger-soft px-1.5 py-0.5 text-caption font-medium text-danger"
+                        title="Marked as playing, but Roobet has never reported this username. Check the Roobet username on their profile, or whether they actually signed up on your code."
+                      >
+                        not wagered
+                      </span>
+                    )}
                     {quiet && (
                       <span
                         className="ml-2 rounded-full bg-warning-soft px-1.5 py-0.5 text-caption font-medium text-warning"
@@ -208,8 +242,11 @@ export function WagerTable({
       )}
 
       <p className="border-t border-line px-4 py-2.5 text-small text-ink-muted">
-        Everyone with wager history is listed. A player marked quiet has wagered
-        before but nothing in either window — worth a message.
+        Everyone with wager history is listed, plus anyone marked as playing who
+        has none. <span className="text-warning">Quiet</span> means they have
+        wagered before but not in either window — worth a message.{" "}
+        <span className="text-danger">Not wagered</span> means Roobet has never
+        reported them at all.
       </p>
     </div>
   );

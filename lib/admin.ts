@@ -1019,6 +1019,11 @@ export type CycleRow = {
   ownerName: string | null;
   status: string | null;
   allTime: number;
+  /* Marked as playing - status Active, or a first deposit on record - with no
+     wager row anywhere, ever. Not "quiet": quiet players have a lifetime
+     figure. These have none, which means either the Roobet username is wrong
+     or the playing never happened. */
+  neverWagered: boolean;
 };
 
 export type CycleReport = {
@@ -1104,6 +1109,7 @@ export async function getWagerCycleReport(
     owner_name: string | null;
     status: string | null;
     all_time: number;
+    never_wagered: boolean | null;
   }[];
 
   const rows: CycleRow[] = raw.map((r) => ({
@@ -1118,6 +1124,10 @@ export async function getWagerCycleReport(
     ownerName: r.owner_name,
     status: r.status,
     allTime: Number(r.all_time),
+    /* Defaults false rather than throwing if migration 057 has not run - the
+       column simply is not there yet, and an unflagged table beats a broken
+       page. */
+    neverWagered: r.never_wagered === true,
   }));
 
   const t = (totalsData ?? [])[0] as

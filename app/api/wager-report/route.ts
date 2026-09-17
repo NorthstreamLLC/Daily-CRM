@@ -117,6 +117,10 @@ export async function GET(request: Request) {
       { key: "month", label: `Wagered ${monthLabel}` },
       { key: "cycle", label: `Wagered Leaderboard ${cycleName}` },
       { key: "allTime", label: "Wagered All Time" },
+      /* Last column, but it is the one to sort by first: marked as playing,
+         never reported by Roobet. A spreadsheet of money should say which of
+         its rows are money that never arrived. */
+      { key: "flag", label: "Never Wagered" },
     ];
 
     const rows: Row[] = report.rows.map((r) => ({
@@ -129,6 +133,7 @@ export async function GET(request: Request) {
       month: r.monthWagered.toFixed(2),
       cycle: r.cycleWagered.toFixed(2),
       allTime: r.allTime.toFixed(2),
+      flag: r.neverWagered ? "YES" : "",
     }));
 
     const stamp = new Date().toISOString().slice(0, 10);
