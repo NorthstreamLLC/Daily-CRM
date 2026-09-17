@@ -75,6 +75,25 @@ export async function updateSession(request: NextRequest) {
   const isPublic =
     path.startsWith("/login") ||
     path.startsWith("/auth") ||
+    /* THE CRON ROUTES. This line is why the scheduled sync never ran.
+
+       Vercel calls /api/cron/* with an Authorization header and NO cookies,
+       because there is no user - it is a machine. Middleware saw no session,
+       decided this was someone browsing while logged out, and redirected to
+       /login with a 307. The route's own code never executed. Not once.
+
+       And it failed in the worst possible way: a 307 to /login is not an
+       error. /login returns 200. Vercel's cron dashboard shows success, the
+       app writes no audit row because the route never ran, and the only
+       symptom is figures that quietly stop moving - which is exactly what
+       "the auto sync hasn't been working" turned out to be.
+
+       Left inside the middleware rather than excluded from the matcher on
+       purpose: the block below strips any x-verified-user header an outside
+       caller might have forged, and skipping middleware entirely would skip
+       that too. These routes need to reach their own CRON_SECRET check, not
+       to escape the request hardening around it. */
+    path.startsWith("/api/cron") ||
     path.startsWith("/reset-password") ||
     /* robots.txt has to be readable by a crawler that is, by definition, not
        signed in. Redirecting it to /login means the file is never delivered
